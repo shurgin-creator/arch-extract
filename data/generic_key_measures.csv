@@ -1,0 +1,19 @@
+Measure Name,Category,Unit of Measure,Description,Notes,Code
+Concrete Slab Area - House,Measurements,SF,Total area of concrete slab foundation for main house structure,Measured in square feet; found in foundation plans; excludes garage,SL_HS
+Concrete Slab Area - Garage,Measurements,SF,Total area of concrete slab foundation for garage area,Measured in square feet; typically separate from main slab; identify as "Garage Slab" or "Driveway",SL_GAR
+Concrete Slab Area - Total,Measurements,SF,Combined total of all concrete slab areas,Sum of house slab and garage slab if both present,SL_TOTAL
+Exterior Wall Linear,Measurements,LF,Total linear footage of exterior walls,Measured in linear feet; perimeter of main structure; includes all outer walls,EW_LF
+Interior Wall Linear,Measurements,LF,Total linear footage of interior walls,Measured in linear feet; sum of all internal partition walls; excludes exterior walls,IW_LF
+Window Count - Single Pane,Measurements,Count,Total number of single-pane windows,Whole number; identify from elevation drawings and floor plans,WIN_SINGLE
+Window Count - Double Pane,Measurements,Count,Total number of double-pane windows,Whole number; more common in modern plans,WIN_DOUBLE
+Window Count - Total,Measurements,Count,Total number of windows,Whole number; sum of all window types,WIN_TOTAL
+Door Count - Exterior,Measurements,Count,Total number of exterior doors,Whole number; includes both sides if shared,DOOR_EXT
+Door Count - Interior,Measurements,Count,Total number of interior doors,Whole number; partition/room doors,DOOR_INT
+Door Count - Total,Measurements,Count,Total number of doors,Whole number; sum of exterior and interior doors,DOOR_TOTAL
+Plan Number,General,Text,Unique identifier for the plan,Alphanumeric; usually found in title block or header,PLAN_NO
+Elevation,General,Text,Elevation designation or view type,e.g., North Elevation; South Elevation; East Elevation; West Elevation,ELEV_VIEW
+Stories,General,Count,Number of stories/levels,Whole number; count vertical levels (1 for single-story; 2 for two-story); exclude basement unless occupied,STORIES
+Width,General,FT,Overall width measurement of structure,Measured in feet; typically the east-west measurement; found in floor plans,WIDTH_FT
+Depth,General,FT,Overall depth measurement of structure,Measured in feet; typically the north-south measurement; found in floor plans,DEPTH_FT
+Bathrooms,General,Count,Number of bathrooms,Whole number; count by fixture groups (toilet + sink + tub/shower = 1 bathroom),BATH_COUNT
+Bedrooms,General,Count,Number of bedrooms,Whole number; count rooms with closets and bedroom dimensions,BED_COUNT

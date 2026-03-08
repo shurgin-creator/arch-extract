@@ -1,0 +1,69 @@
+
+  You can now view your Streamlit app in your browser.
+
+  Local URL: http://localhost:8501
+  Network URL: http://192.168.10.4:8501
+
+  For better performance, install the Watchdog module:
+
+  $ xcode-select --install
+  $ pip install watchdog
+            
+/Users/stavhurgin/Documents/Arch Extract/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.api_core supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.api_core.
+  warnings.warn(message, FutureWarning)
+/Users/stavhurgin/Documents/Arch Extract/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+/Users/stavhurgin/Documents/Arch Extract/venv/lib/python3.9/site-packages/google/auth/__init__.py:54: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/stavhurgin/Documents/Arch Extract/venv/lib/python3.9/site-packages/google/oauth2/__init__.py:40: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+Error processing page 1: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 2: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 3: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 4: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 5: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 6: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 7: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 8: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 9: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 10: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 11: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 12: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 13: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 14: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 15: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 16: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+=== AI EXTRACTION RESULTS ===
+Number of results: 0
+Result keys: []
+=== END AI RESULTS ===
+Button clicked!
+Processing file: STB - ASPEN A5 - L033 - GR - 7-29-25.pdf
+File size: 2556029 bytes
+Selected categories: ['general', 'measurements']
+DPI setting: 300
+=== ENTERING extract_data_from_pdf ===
+File: STB - ASPEN A5 - L033 - GR - 7-29-25.pdf
+Selected categories: ['general', 'measurements']
+DPI: 300
+Error processing page 1: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 2: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 3: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 4: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 5: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 6: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 7: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 8: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 9: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 10: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 11: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 12: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 13: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 14: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 15: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error processing page 16: Error extracting data from image using Gemini: 404 models/gemini-1.5-pro-vision-latest is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+=== AI EXTRACTION RESULTS ===
+Number of results: 0
+Result keys: []
+=== END AI RESULTS ===
+  Stopping...

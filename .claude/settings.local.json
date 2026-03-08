@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__ide__getDiagnostics",
+      "Bash(cd \"/Users/stavhurgin/Documents/Arch Extract\" && python -m flake8 . --max-line-length=120 2>&1 | head -50)",
+      "Bash(cd \"/Users/stavhurgin/Documents/Arch Extract\" && python3 -m flake8 . --max-line-length=120 --exclude=venv 2>&1 | head -80)",
+      "Bash(cd \"/Users/stavhurgin/Documents/Arch Extract\" && pip install flake8 --quiet && python -m flake8 . --max-line-length=120 --exclude=venv 2>&1 | head -80)",
+      "Bash(cd \"/Users/stavhurgin/Documents/Arch Extract\" && python -m flake8 . --max-line-length=120 --exclude=venv 2>&1 | tail -20)",
+      "Bash(cd \"/Users/stavhurgin/Documents/Arch Extract\" && sed -i '' 's/[[:space:]]*$//' app.py src/pdf_processor.py src/gemini_api.py config/extraction_categories.py)"
+    ]
+  }
+}

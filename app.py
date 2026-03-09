@@ -400,7 +400,7 @@ def main():
     initialize_session_state()
 
     # The 'Magic' Display at the VERY top
-    if 'data' in st.session_state and st.session_state['data']:
+    if 'data' in st.session_state and isinstance(st.session_state['data'], pd.DataFrame) and not st.session_state['data'].empty:
         st.success('Extraction Complete!')
         st.dataframe(st.session_state['data'])
 

@@ -54,7 +54,7 @@ class GeminiDataExtractor:
         Returns:
             Dictionary with extracted data and confidence levels
         """
-        system_prompt = self._build_system_prompt(extraction_fields)
+        system_prompt = self._build_consolidated_system_prompt(extraction_fields, 1)
         max_retries = 3
         
         for attempt in range(max_retries):

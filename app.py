@@ -10,6 +10,7 @@ import pandas as pd
 import json
 from io import BytesIO
 from datetime import datetime
+import traceback
 
 # Load environment variables
 load_dotenv()
@@ -416,100 +417,105 @@ def main():
             st.session_state.load_project = False
             st.session_state.selected_project_id = None
 
-    # Header
-    st.markdown("<div class='main-header'>📐 Architectural PDF Data Extractor</div>", unsafe_allow_html=True)
-    st.markdown("Professional Data Extraction System with Persistent Storage & Quality Control")
-    st.divider()
-
-    # Sidebar - Project History & Configuration
-    with st.sidebar:
-        # Project History Section
-        show_project_history()
+    try:
+        # Header
+        st.markdown("<div class='main-header'>📐 Architectural PDF Data Extractor</div>", unsafe_allow_html=True)
+        st.markdown("Professional Data Extraction System with Persistent Storage & Quality Control")
         st.divider()
 
-        st.header("⚙️ Configuration")
+        # Sidebar - Project History & Configuration
+        with st.sidebar:
+            # Project History Section
+            show_project_history()
+            st.divider()
 
-        st.subheader("Extraction Categories")
-        st.info("Categories are configured in `config/extraction_categories.py`")
+            st.header("⚙️ Configuration")
 
-        selected_categories = st.multiselect(
-            "Select categories to extract:",
-            options=list(EXTRACTION_CATEGORIES.keys()),
-            default=list(EXTRACTION_CATEGORIES.keys()),
-            help="Choose which data categories to extract from the PDF"
-        )
+            st.subheader("Extraction Categories")
+            st.info("Categories are configured in `config/extraction_categories.py`")
 
-        st.subheader("PDF Processing Settings")
-        dpi = st.slider(
-            "Resolution (DPI):",
-            min_value=150,
-            max_value=600,
-            value=200,
-            step=50,
-            help="Higher DPI = better quality but slower processing"
-        )
+            selected_categories = st.multiselect(
+                "Select categories to extract:",
+                options=list(EXTRACTION_CATEGORIES.keys()),
+                default=list(EXTRACTION_CATEGORIES.keys()),
+                help="Choose which data categories to extract from the PDF"
+            )
 
-        st.subheader("API Status")
-        api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        if api_key:
-            st.success("✓ Gemini API key configured")
-        else:
-            st.error("✗ Gemini API key missing. Add to Streamlit secrets or .env file")
+            st.subheader("PDF Processing Settings")
+            dpi = st.slider(
+                "Resolution (DPI):",
+                min_value=150,
+                max_value=600,
+                value=200,
+                step=50,
+                help="Higher DPI = better quality but slower processing"
+            )
 
-    # Main content area
-    col1, col2 = st.columns([2, 1])
+            st.subheader("API Status")
+            api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            if api_key:
+                st.success("✓ Gemini API key configured")
+            else:
+                st.error("✗ Gemini API key missing. Add to Streamlit secrets or .env file")
 
-    with col1:
-        st.subheader("📄 Upload PDF")
-        uploaded_file = st.file_uploader(
-            "Choose an architectural PDF file",
-            type="pdf",
-            help="Upload a PDF containing architectural plans"
-        )
+        # Main content area
+        col1, col2 = st.columns([2, 1])
 
-    with col2:
-        st.subheader("🔄 Processing")
-        if uploaded_file:
-            if st.button("Extract Data", type="primary", use_container_width=True):
-                print("Button clicked!")
-                print(f"Processing file: {uploaded_file.name}")
-                print(f"File size: {len(uploaded_file.getvalue())} bytes")
-                print(f"Selected categories: {selected_categories}")
-                print(f"DPI setting: {dpi}")
+        with col1:
+            st.subheader("📄 Upload PDF")
+            uploaded_file = st.file_uploader(
+                "Choose an architectural PDF file",
+                type="pdf",
+                help="Upload a PDF containing architectural plans"
+            )
 
-                try:
-                    # First, quickly determine page count for dynamic messaging
-                    pdf_processor_temp = PDFProcessor(dpi=dpi, fmt="png")
-                    pdf_bytes = uploaded_file.read()
-                    temp_images = pdf_processor_temp.convert_pdf_bytes(pdf_bytes)
-                    page_count = len(temp_images)
-                    
-                    # Reset file pointer for actual processing
-                    uploaded_file.seek(0)
-                    
-                    # Calculate estimated time (single API call, but longer processing time)
-                    # Estimate ~2-3 minutes for consolidated analysis regardless of page count
-                    estimated_minutes = 3
-                    
-                    with st.spinner(f"🔄 Analyzing all {page_count} pages with Gemini... this will take approx {estimated_minutes} minutes. Please do not refresh."):
-                        extract_data_from_pdf(
-                            uploaded_file,
-                            selected_categories,
-                            dpi
-                        )
-                except Exception as e:
-                    print(f"ERROR in button click: {str(e)}")
-                    st.error(f"❌ Processing failed: {str(e)}")
-                    import traceback
-                    traceback.print_exc()
-        else:
-            st.info("Please upload a PDF file to begin extraction")
+        with col2:
+            st.subheader("🔄 Processing")
+            if uploaded_file:
+                if st.button("Extract Data", type="primary", use_container_width=True):
+                    print("Button clicked!")
+                    print(f"Processing file: {uploaded_file.name}")
+                    print(f"File size: {len(uploaded_file.getvalue())} bytes")
+                    print(f"Selected categories: {selected_categories}")
+                    print(f"DPI setting: {dpi}")
 
-    st.divider()
+                    try:
+                        # First, quickly determine page count for dynamic messaging
+                        pdf_processor_temp = PDFProcessor(dpi=dpi, fmt="png")
+                        pdf_bytes = uploaded_file.read()
+                        temp_images = pdf_processor_temp.convert_pdf_bytes(pdf_bytes)
+                        page_count = len(temp_images)
+                        
+                        # Reset file pointer for actual processing
+                        uploaded_file.seek(0)
+                        
+                        # Calculate estimated time (single API call, but longer processing time)
+                        # Estimate ~2-3 minutes for consolidated analysis regardless of page count
+                        estimated_minutes = 3
+                        
+                        with st.spinner(f"🔄 Analyzing all {page_count} pages with Gemini... this will take approx {estimated_minutes} minutes. Please do not refresh."):
+                            extract_data_from_pdf(
+                                uploaded_file,
+                                selected_categories,
+                                dpi
+                            )
+                    except Exception as e:
+                        print(f"ERROR in button click: {str(e)}")
+                        st.error(f"❌ Processing failed: {str(e)}")
+                        import traceback
+                        traceback.print_exc()
+            else:
+                st.info("Please upload a PDF file to begin extraction")
 
-    # Display results if available
-    if st.session_state.extraction_results:
-        display_results()
+        st.divider()
+
+        # Display results if available
+        if st.session_state.extraction_results:
+            display_results()
+
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
+        st.code(traceback.format_exc())
 
 
 def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):

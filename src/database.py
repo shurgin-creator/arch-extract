@@ -22,62 +22,63 @@ class ExtractionDatabase:
             db_path: Path to the SQLite database file
         """
         self.db_path = db_path
-        self.init_db()
+        try:
+            self.init_db()
+        except sqlite3.OperationalError:
+            # Fallback to in-memory database for read-only filesystems
+            self.db_path = ":memory:"
+            self.init_db()
 
     def init_db(self):
         """Initialize database schema if it doesn't exist."""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
 
-            # Create projects table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS projects (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    project_name TEXT NOT NULL,
-                    filename TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    total_pages INTEGER,
-                    analysis_json TEXT NOT NULL,
-                    user_feedback TEXT,
-                    refined_analysis_json TEXT,
-                    UNIQUE(project_name)
-                )
-            """)
+        # Create projects table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_name TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                total_pages INTEGER,
+                analysis_json TEXT NOT NULL,
+                user_feedback TEXT,
+                refined_analysis_json TEXT,
+                UNIQUE(project_name)
+            )
+        """)
 
-            # Create extraction history (for tracking refinements)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS extraction_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    project_id INTEGER NOT NULL,
-                    version INTEGER NOT NULL,
-                    analysis_json TEXT NOT NULL,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    refinement_reason TEXT,
-                    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-                )
-            """)
+        # Create extraction history (for tracking refinements)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS extraction_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                version INTEGER NOT NULL,
+                analysis_json TEXT NOT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                refinement_reason TEXT,
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+            )
+        """)
 
-            # Create field refinements (for tracking individual field challenges)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS field_refinements (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    project_id INTEGER NOT NULL,
-                    field_code TEXT NOT NULL,
-                    original_value TEXT,
-                    refined_value TEXT,
-                    user_feedback TEXT,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-                )
-            """)
+        # Create field refinements (for tracking individual field challenges)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS field_refinements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                field_code TEXT NOT NULL,
+                original_value TEXT,
+                refined_value TEXT,
+                user_feedback TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+            )
+        """)
 
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            print(f"Database initialization failed: {e}")
-            self.db_path = None
+        conn.commit()
+        conn.close()
 
     def save_project(self, project_name: str, filename: str, analysis_json: dict, total_pages: int) -> int:
         """
@@ -92,8 +93,6 @@ class ExtractionDatabase:
         Returns:
             Project ID
         """
-        if self.db_path is None:
-            return None
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
@@ -136,8 +135,6 @@ class ExtractionDatabase:
         Returns:
             List of project dictionaries with id, project_name, created_at, updated_at, total_pages
         """
-        if self.db_path is None:
-            return []
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
@@ -163,8 +160,6 @@ class ExtractionDatabase:
         Returns:
             Project dictionary with full analysis JSON
         """
-        if self.db_path is None:
-            return None
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
@@ -205,8 +200,6 @@ class ExtractionDatabase:
         Returns:
             True if successful, False otherwise
         """
-        if self.db_path is None:
-            return False
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
@@ -243,8 +236,6 @@ class ExtractionDatabase:
         Returns:
             True if successful
         """
-        if self.db_path is None:
-            return False
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
@@ -274,8 +265,6 @@ class ExtractionDatabase:
         Returns:
             True if successful
         """
-        if self.db_path is None:
-            return False
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
@@ -316,8 +305,6 @@ class ExtractionDatabase:
         Returns:
             List of refinement records
         """
-        if self.db_path is None:
-            return []
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
@@ -344,8 +331,6 @@ class ExtractionDatabase:
         Returns:
             Project dictionary or None
         """
-        if self.db_path is None:
-            return None
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 

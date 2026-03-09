@@ -404,18 +404,18 @@ def main():
         db = get_db()
         project = db.get_project(st.session_state.selected_project_id)
         if project:
-            # Handle analysis_json - could be dict (already parsed) or string (needs parsing)
-            if isinstance(project['analysis_json'], dict):
-                st.session_state.extraction_results = project['analysis_json']
-            else:
-                st.session_state.extraction_results = json.loads(project['analysis_json'])
+            # Complete load with JSON safety
+            data = project['analysis_json']
+            st.session_state.extraction_results = data if isinstance(data, (dict, list)) else json.loads(data)
             
+            # Persistence
             st.session_state.current_project_id = project['id']
             st.session_state.current_project_name = project['project_name']
             st.session_state.pdf_processed = True
             st.session_state.load_project = False
             st.session_state.selected_project_id = None
             st.success(f"Loaded project: {project['project_name']}")
+            # UI Trigger
             st.rerun()
         else:
             st.error("Project not found")

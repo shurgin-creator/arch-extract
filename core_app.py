@@ -404,7 +404,12 @@ def main():
         db = get_db()
         project = db.get_project(st.session_state.selected_project_id)
         if project:
-            st.session_state.extraction_results = json.loads(project['analysis_json'])
+            # Handle analysis_json - could be dict (already parsed) or string (needs parsing)
+            if isinstance(project['analysis_json'], dict):
+                st.session_state.extraction_results = project['analysis_json']
+            else:
+                st.session_state.extraction_results = json.loads(project['analysis_json'])
+            
             st.session_state.current_project_id = project['id']
             st.session_state.current_project_name = project['project_name']
             st.session_state.pdf_processed = True

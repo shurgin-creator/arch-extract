@@ -15,15 +15,10 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Import custom modules inside error boundary
-try:
-    from src.pdf_processor import PDFProcessor  # noqa: E402
-    from src.gemini_api import GeminiDataExtractor  # noqa: E402
-    from src.database import get_db  # noqa: E402
-    from config.extraction_categories import EXTRACTION_CATEGORIES  # noqa: E402
-except Exception:
-    st.error(traceback.format_exc())
-    st.stop()
+from src.pdf_processor import PDFProcessor  # noqa: E402
+from src.gemini_api import GeminiDataExtractor  # noqa: E402
+from src.database import get_db  # noqa: E402
+from config.extraction_categories import EXTRACTION_CATEGORIES  # noqa: E402
 
 # Page configuration
 st.set_page_config(

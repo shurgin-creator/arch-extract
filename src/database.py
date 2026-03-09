@@ -181,9 +181,17 @@ class ExtractionDatabase:
             columns = [description[0] for description in cursor.description]
             project = dict(zip(columns, row))
             # Parse JSON fields
-            project["analysis_json"] = json.loads(project["analysis_json"])
+            try:
+                project["analysis_json"] = json.loads(project["analysis_json"])
+            except json.JSONDecodeError:
+                print(f"Error decoding analysis_json for project {project_id}")
+                return None
             if project["refined_analysis_json"]:
-                project["refined_analysis_json"] = json.loads(project["refined_analysis_json"])
+                try:
+                    project["refined_analysis_json"] = json.loads(project["refined_analysis_json"])
+                except json.JSONDecodeError:
+                    print(f"Error decoding refined_analysis_json for project {project_id}")
+                    project["refined_analysis_json"] = None
             return project
         return None
 
@@ -353,7 +361,11 @@ class ExtractionDatabase:
         if row:
             columns = [description[0] for description in cursor.description]
             project = dict(zip(columns, row))
-            project["analysis_json"] = json.loads(project["analysis_json"])
+            try:
+                project["analysis_json"] = json.loads(project["analysis_json"])
+            except json.JSONDecodeError:
+                print(f"Error decoding analysis_json for project {project_name}")
+                return None
             return project
         return None
 

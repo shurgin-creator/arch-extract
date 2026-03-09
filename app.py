@@ -514,7 +514,7 @@ def main():
 
         st.divider()
 
-        if st.session_state.current_project_id:
+        if st.session_state.extraction_results:
             st.write(f"Debug: Results found: {len(st.session_state.extraction_results) if st.session_state.extraction_results else 0}")
             display_results()
 
@@ -610,6 +610,9 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
         st.session_state.pdf_processed = True
 
         progress_bar.progress(85)
+
+        # Auto-refresh immediately after setting state
+        st.rerun()
 
         # Step 5: Save to database
         add_log_entry("Saving project to database...")

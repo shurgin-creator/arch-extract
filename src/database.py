@@ -14,14 +14,31 @@ import streamlit as st
 class ExtractionDatabase:
     """SQLite database manager for extraction projects."""
 
-    def __init__(self, db_path: str = "extraction_projects.db"):
+    def __init__(self, db_path: Optional[str] = None):
         """
         Initialize database connection.
 
         Args:
-            db_path: Path to the SQLite database file
+            db_path: Path to the SQLite database file (optional, defaults to data/extraction_projects.db)
         """
-        self.db_path = db_path
+        BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        default_db_path = os.path.join(BASE_DIR, 'data', 'extraction_projects.db')
+        
+        # Path safety: ensure data directory exists
+        os.makedirs(os.path.dirname(default_db_path), exist_ok=True)
+        
+        if db_path is None:
+            # Use default path
+            self.db_path = default_db_path
+            
+            # One-time migration: move old database if it exists
+            old_path = "extraction_projects.db"
+            if os.path.exists(old_path) and not os.path.exists(self.db_path):
+                print(f"Migrating database from {old_path} to {self.db_path}")
+                os.rename(old_path, self.db_path)
+        else:
+            self.db_path = db_path
+        
         try:
             self.init_db()
         except sqlite3.OperationalError:
@@ -111,6 +128,7 @@ class ExtractionDatabase:
             """, (project_id, json.dumps(analysis_json)))
 
             conn.commit()
+            print(f"Project '{project_name}' saved to database at: {self.db_path}")
             return project_id
 
         except sqlite3.IntegrityError:
@@ -124,6 +142,7 @@ class ExtractionDatabase:
             cursor.execute("SELECT id FROM projects WHERE project_name = ?", (project_name,))
             project_id = cursor.fetchone()[0]
             conn.commit()
+            print(f"Project '{project_name}' updated in database at: {self.db_path}")
             return project_id
         finally:
             conn.close()

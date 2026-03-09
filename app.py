@@ -399,28 +399,14 @@ def main():
     """Main Streamlit application - Professional Project Management System."""
     initialize_session_state()
 
-    # Handle loading a project from history
-    if st.session_state.load_project and st.session_state.selected_project_id:
-        db = get_db()
-        project = db.get_project(st.session_state.selected_project_id)
-        if project:
-            # Complete load with JSON safety
-            data = project['analysis_json']
-            st.session_state.extraction_results = data if isinstance(data, (dict, list)) else json.loads(data)
-            
-            # Persistence
-            st.session_state.current_project_id = project['id']
-            st.session_state.current_project_name = project['project_name']
-            st.session_state.pdf_processed = True
-            st.session_state.load_project = False
-            st.session_state.selected_project_id = None
-            st.success(f"Loaded project: {project['project_name']}")
-            # UI Trigger
-            st.rerun()
-        else:
-            st.error("Project not found")
-            st.session_state.load_project = False
-            st.session_state.selected_project_id = None
+    # The 'Magic' Display at the VERY top
+    if 'data' in st.session_state and st.session_state['data']:
+        st.success('Extraction Complete!')
+        st.dataframe(st.session_state['data'])
+
+    # Handle loading a project from history - TEMPORARILY DISABLED
+    # if st.session_state.load_project and st.session_state.selected_project_id:
+    #     ...
 
     try:
         # Header
@@ -430,9 +416,9 @@ def main():
 
         # Sidebar - Project History & Configuration
         with st.sidebar:
-            # Project History Section
-            show_project_history()
-            st.divider()
+            # Project History Section - TEMPORARILY DISABLED
+            # show_project_history()
+            # st.divider()
 
             st.header("⚙️ Configuration")
 
@@ -513,10 +499,6 @@ def main():
                 st.info("Please upload a PDF file to begin extraction")
 
         st.divider()
-
-        if st.session_state.extraction_results:
-            st.write(f"Debug: Results found: {len(st.session_state.extraction_results) if st.session_state.extraction_results else 0}")
-            display_results()
 
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")
@@ -599,6 +581,9 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
         # Clear progress indicators
         progress_placeholder.empty()
         status_placeholder.empty()
+
+        # Global Variable: save to simple st.session_state['data']
+        st.session_state['data'] = format_extraction_results(results)
 
         # Debug: Print results to terminal
         print("=== AI EXTRACTION RESULTS ===")

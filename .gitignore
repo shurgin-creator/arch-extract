@@ -44,6 +44,7 @@ env/
 
 # Streamlit
 .streamlit/
+!.streamlit/config.toml
 
 # Uploaded files
 uploads/

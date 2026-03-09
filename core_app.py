@@ -458,6 +458,10 @@ def main():
                 st.error("✗ Gemini API key missing. Add to Streamlit secrets or .env file")
 
         # Main content area
+        if st.session_state.extraction_results:
+            display_results()
+            st.divider()
+
         col1, col2 = st.columns([2, 1])
 
         with col1:
@@ -505,12 +509,6 @@ def main():
                         traceback.print_exc()
             else:
                 st.info("Please upload a PDF file to begin extraction")
-
-        st.divider()
-
-        # Display results if available
-        if st.session_state.extraction_results:
-            display_results()
 
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")

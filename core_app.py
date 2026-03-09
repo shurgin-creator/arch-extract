@@ -565,21 +565,25 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
                     selected_field_defs[code] = field
 
         # Step 4: Extract data
-        add_log_entry(f"Starting consolidated analysis of {len(images)} pages...")
-        status_text.text("🔍 Extracting data from images...")
+        add_log_entry(f"Starting paged analysis of {len(images)} pages...")
+        status_text.text("🔍 Extracting data from images (page by page)...")
         progress_bar.progress(70)
 
-        # Create progress tracking for consolidated extraction
+        # Create progress tracking for paged extraction
         progress_placeholder = st.empty()
         status_placeholder = st.empty()
         
-        # Show that we're sending all pages to Gemini at once
-        progress_placeholder.text("🔄 Sending all pages to Gemini for consolidated analysis...")
-        status_placeholder.text("This may take several minutes for large PDFs...")
+        # Progress callback for paged extraction
+        def update_progress(page_num, total_pages):
+            progress_percent = 70 + int((page_num / total_pages) * 15)  # 70% to 85%
+            progress_bar.progress(progress_percent)
+            progress_placeholder.text(f"📄 Processing page {page_num}/{total_pages}...")
+            status_placeholder.text(f"Rate-limited API calls with 15s delays between pages...")
+            add_log_entry(f"Completed page {page_num}/{total_pages}")
 
-        # Use consolidated extraction method (all pages at once)
-        results = extractor.extract_data_from_all_pages_consolidated(images, fields_to_extract)
-        add_log_entry("Data extraction completed successfully")
+        # Use paged extraction method (one page at a time with delays)
+        results = extractor.extract_data_from_multiple_pages(images, fields_to_extract, update_progress)
+        add_log_entry("Paged data extraction completed successfully")
 
         # Clear progress indicators
         progress_placeholder.empty()

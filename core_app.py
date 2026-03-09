@@ -404,7 +404,7 @@ def main():
         db = get_db()
         project = db.get_project(st.session_state.selected_project_id)
         if project:
-            st.session_state.extraction_results = project['analysis_json']
+            st.session_state.extraction_results = json.loads(project['analysis_json'])
             st.session_state.current_project_id = project['id']
             st.session_state.current_project_name = project['project_name']
             st.session_state.pdf_processed = True
@@ -510,6 +510,7 @@ def main():
         st.divider()
 
         if st.session_state.current_project_id:
+            st.write(f"Debug: Results found: {len(st.session_state.extraction_results) if st.session_state.extraction_results else 0}")
             display_results()
 
     except Exception as e:
@@ -525,6 +526,11 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
     print(f"DPI: {dpi}")
 
     try:
+        # Clear previous results to avoid conflicts
+        st.session_state.extraction_results = None
+        st.session_state.current_project_id = None
+        st.session_state.current_project_name = None
+
         # Initialize components
         progress_bar = st.progress(0)
         status_text = st.empty()

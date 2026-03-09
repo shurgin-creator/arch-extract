@@ -411,6 +411,7 @@ def main():
             st.session_state.load_project = False
             st.session_state.selected_project_id = None
             st.success(f"Loaded project: {project['project_name']}")
+            st.rerun()
         else:
             st.error("Project not found")
             st.session_state.load_project = False
@@ -458,10 +459,6 @@ def main():
                 st.error("✗ Gemini API key missing. Add to Streamlit secrets or .env file")
 
         # Main content area
-        if st.session_state.extraction_results:
-            display_results()
-            st.divider()
-
         col1, col2 = st.columns([2, 1])
 
         with col1:
@@ -509,6 +506,11 @@ def main():
                         traceback.print_exc()
             else:
                 st.info("Please upload a PDF file to begin extraction")
+
+        st.divider()
+
+        if st.session_state.current_project_id:
+            display_results()
 
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")

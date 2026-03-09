@@ -48,6 +48,10 @@ env/
 # Uploaded files
 uploads/
 temp/
+
+# Allow tracking of Python files and requirements
+!*.py
+!requirements.txt
 *.pdf
 *.png
 *.jpg

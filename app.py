@@ -399,6 +399,23 @@ def main():
     """Main Streamlit application - Professional Project Management System."""
     initialize_session_state()
 
+    # Handle loading a project from history
+    if st.session_state.load_project and st.session_state.selected_project_id:
+        db = get_db()
+        project = db.get_project(st.session_state.selected_project_id)
+        if project:
+            st.session_state.extraction_results = project['analysis_json']
+            st.session_state.current_project_id = project['id']
+            st.session_state.current_project_name = project['project_name']
+            st.session_state.pdf_processed = True
+            st.session_state.load_project = False
+            st.session_state.selected_project_id = None
+            st.success(f"Loaded project: {project['project_name']}")
+        else:
+            st.error("Project not found")
+            st.session_state.load_project = False
+            st.session_state.selected_project_id = None
+
     # Header
     st.markdown("<div class='main-header'>📐 Architectural PDF Data Extractor</div>", unsafe_allow_html=True)
     st.markdown("Professional Data Extraction System with Persistent Storage & Quality Control")

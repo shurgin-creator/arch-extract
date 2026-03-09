@@ -3,6 +3,7 @@ PDF processing utilities for converting pages to high-resolution images.
 """
 
 import os
+import sys
 from pdf2image import convert_from_path, convert_from_bytes
 from PIL import Image
 from typing import List
@@ -22,8 +23,11 @@ class PDFProcessor:
         self.dpi = dpi
         self.fmt = fmt
 
-        # Hardcoded poppler path for macOS/homebrew
-        self.poppler_path = "/opt/homebrew/bin"
+        # Set poppler path based on platform
+        if sys.platform == "darwin" and os.path.exists("/opt/homebrew/bin"):
+            self.poppler_path = "/opt/homebrew/bin"
+        else:
+            self.poppler_path = None
 
     def convert_pdf_file(self, file_path: str) -> List[Image.Image]:
         """

@@ -1,9 +1,7 @@
 # Core dependencies for the project
 streamlit
-# Google Gemini SDK (installed as google-generativeai)
-# `google-genai` is an alias used in documentation
-google-generativeai
-google-generativeai
+# Google Gemini SDK
+google-genai
 pdf2image
 pillow
 python-dotenv

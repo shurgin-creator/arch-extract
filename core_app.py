@@ -625,6 +625,9 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
 
         st.success("✅ Data extraction completed successfully!")
 
+        # Force UI refresh to display results
+        st.rerun()
+
     except ValueError as e:
         add_log_entry(f"Error: {str(e)}")
         st.error(f"⚠️ Configuration Error: {str(e)}")

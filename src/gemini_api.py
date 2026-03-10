@@ -69,8 +69,9 @@ class GeminiDataExtractor:
                 contents = [
                     system_prompt,
                     image,
-                    "\n\nPlease analyze this architectural PDF page and extract the requested data. "
-                    "Return results as JSON with field_name, value, unit, and confidence (0-100) for each field."
+                    f"\n\nIMPORTANT: You are currently analyzing PAGE {page_num} of the original PDF. "
+                    f"In your reasoning and page_reference fields, you MUST write 'Page {page_num}'.\n\n"
+                    "Please extract the requested data and return results as JSON."
                 ]
                 
                 response = self.client.models.generate_content(

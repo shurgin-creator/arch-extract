@@ -4,6 +4,7 @@ Gemini API integration for architectural data extraction.
 
 import os
 import json
+import re
 import time
 from typing import Dict, List, Optional
 from PIL import Image
@@ -229,7 +230,6 @@ Return ONLY a JSON object with this structure:
                 print(f"=== REFINEMENT RESPONSE ===\n{response_text[:500]}\n===")
 
                 # Extract JSON from response
-                import re
                 json_match = re.search(r'\{[\s\S]*\}', response_text)
                 if json_match:
                     json_str = json_match.group(0)
@@ -428,7 +428,6 @@ CRITICAL REQUIREMENTS:
             print("=== END RAW RESPONSE ===")
 
             # Try to extract JSON from response
-            import re
             json_match = re.search(r'\{[\s\S]*\}', response_text)
             if json_match:
                 json_str = json_match.group(0)

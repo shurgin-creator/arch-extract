@@ -9,6 +9,7 @@ import pandas as pd
 import json
 from io import BytesIO
 from datetime import datetime
+import time
 import traceback
 from dotenv import load_dotenv
 
@@ -301,7 +302,7 @@ def format_extraction_results(results: dict) -> pd.DataFrame:
     # Sort by category, then by confidence level (descending)
     if not df.empty and "_confidence_numeric" in df.columns:
         df = df.sort_values(by=["Category", "_confidence_numeric"], ascending=[True, False])
-        df = df.drop("_confidence_numeric", axis=1)
+        df = df.drop(columns=["_confidence_numeric", "_validation_status", "_field_code"], errors="ignore")
 
     print(f"Final DataFrame shape: {df.shape}")
     print(f"Final DataFrame columns: {list(df.columns)}")
@@ -493,12 +494,15 @@ def main():
                     except Exception as e:
                         print(f"ERROR in button click: {str(e)}")
                         st.error(f"❌ Processing failed: {str(e)}")
-                        import traceback
                         traceback.print_exc()
             else:
                 st.info("Please upload a PDF file to begin extraction")
 
         st.divider()
+
+        # Display results if available
+        if st.session_state.extraction_results:
+            display_results()
 
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")
@@ -594,11 +598,6 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
         st.session_state.extraction_results = results
         st.session_state.pdf_processed = True
 
-        progress_bar.progress(85)
-
-        # Auto-refresh immediately after setting state
-        st.rerun()
-
         # Step 5: Save to database
         add_log_entry("Saving project to database...")
         db = get_db()
@@ -615,16 +614,10 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
 
         progress_bar.progress(100)
         status_text.text("✓ Data extraction & saving complete!")
-
-        # Clear progress indicators after a moment
-        import time
-        time.sleep(1)
         progress_bar.empty()
         status_text.empty()
 
-        st.success("✅ Data extraction completed successfully!")
-
-        # Force UI refresh to display results
+        # Refresh UI to display results
         st.rerun()
 
     except ValueError as e:

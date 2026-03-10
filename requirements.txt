@@ -7,3 +7,5 @@ pillow
 python-dotenv
 pandas
 openpyxl
+# Hybrid PDF text extraction (Phase 1 accuracy boost)
+PyMuPDF

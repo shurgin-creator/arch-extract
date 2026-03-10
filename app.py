@@ -533,8 +533,10 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
 
         pdf_processor = PDFProcessor(dpi=dpi, fmt="png")
         pdf_bytes = uploaded_file.read()
-        images = pdf_processor.convert_pdf_bytes(pdf_bytes)
+        # Hybrid extraction: get images AND embedded text in one pass
+        images, page_texts = pdf_processor.convert_pdf_bytes_with_text(pdf_bytes)
         st.session_state.extracted_images = images
+        add_log_entry(f"Hybrid text extraction: {sum(len(t) for t in page_texts)} chars from {len(images)} pages")
 
         add_log_entry(f"PDF converted to {len(images)} page(s)")
         status_text.text(f"✓ PDF converted to {len(images)} page(s)")
@@ -579,7 +581,7 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
             add_log_entry(f"Completed page {page_num}/{total_pages}")
 
         # Use paged extraction method (one page at a time with delays)
-        results = extractor.extract_data_from_multiple_pages(images, fields_to_extract, update_progress)
+        results = extractor.extract_data_from_multiple_pages(images, fields_to_extract, update_progress, page_texts)
         add_log_entry("Paged data extraction completed successfully")
 
         # Clear progress indicators

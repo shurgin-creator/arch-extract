@@ -41,7 +41,8 @@ class GeminiDataExtractor:
             print(f"Could not list models: {e}")
 
     def extract_data_from_image(
-        self, image: Image.Image, extraction_fields: List[str], page_num: int = 1
+        self, image: Image.Image, extraction_fields: List[str], page_num: int = 1,
+        page_text: str = ""
     ) -> Dict[str, Dict[str, any]]:
         """
         Extract architectural data from a single image using Gemini.
@@ -67,12 +68,26 @@ class GeminiDataExtractor:
                     time.sleep(delay)
                 
                 # Generate content using new google.genai API
+                # Hybrid injection: prepend machine-readable text extracted by PyMuPDF
+                hybrid_context = ""
+                if page_text and page_text.strip():
+                    hybrid_context = (
+                        f"\n\n=== MACHINE-READABLE TEXT EXTRACTED BY PyMuPDF (Page {page_num}) ===\n"
+                        f"{page_text.strip()}\n"
+                        "=== END EXTRACTED TEXT ===\n"
+                        "IMPORTANT: The text above was extracted directly from the PDF's embedded data "
+                        "(not OCR). Treat dimension values, area figures, and labels found in this text "
+                        "as HIGH-CONFIDENCE ground truth. Use the image to fill any gaps not covered "
+                        "by the extracted text.\n"
+                    )
+
                 contents = [
                     system_prompt,
                     image,
                     f"\n\nIMPORTANT: You are currently analyzing PAGE {page_num} of the original PDF. "
-                    f"In your reasoning and page_reference fields, you MUST write 'Page {page_num}'.\n\n"
-                    "Please extract the requested data and return results as JSON."
+                    f"In your reasoning and page_reference fields, you MUST write 'Page {page_num}'.\n"
+                    + hybrid_context
+                    + "\nPlease extract the requested data and return results as JSON."
                 ]
                 
                 response = self.client.models.generate_content(
@@ -104,7 +119,8 @@ class GeminiDataExtractor:
         raise RuntimeError(f"Failed to process page {page_num} after {max_retries} attempts")
 
     def extract_data_from_multiple_pages(
-        self, images: List[Image.Image], extraction_fields: List[str], progress_callback=None
+        self, images: List[Image.Image], extraction_fields: List[str], progress_callback=None,
+        page_texts: List[str] = None
     ) -> Dict[str, Dict[str, any]]:
         """
         Extract data from ALL PDF pages and aggregate results.
@@ -126,7 +142,8 @@ class GeminiDataExtractor:
         for page_num, image in enumerate(images, 1):
             try:
                 print(f"Processing page {page_num}/{total_pages}...")
-                result = self.extract_data_from_image(image, extraction_fields, page_num)
+                text_for_page = (page_texts[page_num - 1] if page_texts and page_num - 1 < len(page_texts) else "")
+                result = self.extract_data_from_image(image, extraction_fields, page_num, text_for_page)
                 result["page_number"] = page_num
                 all_results.append(result)
                 
@@ -328,31 +345,81 @@ Return ONLY a JSON object with this structure:
         Includes AI reasoning, scaling validation, self-correction, and traceability.
         """
         fields_list = "\n".join([f"- {field}" for field in extraction_fields])
+        fields_count = len(extraction_fields)
 
-        return f"""You are a PROFESSIONAL architectural plan analyzer and data extraction expert with deep knowledge of building codes, standards, and construction documentation.
+        return f"""You are a PROFESSIONAL architectural plan analyzer and construction estimating expert with deep knowledge of building codes, residential construction standards, and plan documentation conventions.
+
+================================================================================
+HYBRID EXTRACTION INSTRUCTIONS
+================================================================================
+
+When machine-readable text extracted by PyMuPDF is provided alongside the image,
+you MUST treat that text as primary HIGH-CONFIDENCE source data. Cross-reference it
+with the visual image. The image is used to fill in values not captured in text.
+
+================================================================================
+ARCHITECTURAL GLOSSARY (use to interpret field codes correctly)
+================================================================================
+
+FOUNDATIONS:
+  SL_TOTAL/SL_HS/SL_GAR/SL_POR — concrete slab square footage for each area
+  FND_FTG — perimeter footings in linear feet; FND_FTG_PAD — isolated pad footings
+
+WALLS:
+  WE_* — Exterior walls by stud size (2x4, 2x6) or material (CMU block)
+  WI_* — Interior partition walls; WI_MTL = light gauge metal stud
+  WE_TOTAL/WI_TOTAL — sum of all exterior/interior wall segments in LF
+
+SHEATHING: OSB or plywood panels applied to walls, floor, and roof decks
+  SH_WA_FIRE / SH_RF_FIRE — Type-X fire-rated gypsum or rated sheathing
+
+ROOFING GEOMETRY:
+  RF_EV = eave (horizontal overhang edge); RF_HP = hip rafter line
+  RF_RK = rake (sloped gable edge); RF_RDG = ridge cap; RF_VL = valley (interior intersection)
+  RF_RKW = rake meets a wall; RF_EVW = eave meets a wall; RF_RDGV = ridge vent strip
+
+SIDING / EXTERIOR FINISHES:
+  EF_HS = horizontal lap siding; EF_BNB = board-and-batten vertical siding
+  EF_SHK = shake/shingle siding; EF_STN = stone veneer; EF_BRI = brick veneer
+  Soldier course = brick/stone laid vertically on end (above windows)
+  Rowlock course = brick laid on edge with hole visible (window sill detail)
+  Watertable = decorative horizontal band at base of wall, typically different material
+
+LINTELS: steel angles or precast concrete beams spanning door/window openings
+
+TRIMS:
+  TE_CNR = corner trim boards; TE_SHR = shutters (decorative or functional)
+  TE_SOFFIT = underside of roof overhang cladding; TE_FASCIA = vertical trim at eave edge
+  TE_ZFLASH = Z-shaped metal flashing at horizontal joints; TE_FOAM = decorative foam trim
+  TE_DS = downspouts; TE_GUTTER = gutters at eave
+
+DOORS: DI_SW = single-swing interior; DI_2SW = double-swing (French doors)
+  LF_DOOR_CASING = linear feet of door casing trim; INT_CASING = count of cased openings
 
 ================================================================================
 PROFESSIONAL ACCURACY LEVEL - ANALYSIS REQUIREMENTS
 ================================================================================
 
 YOUR TASK:
-Analyze ALL {total_pages} architectural PDF pages together and extract data using the Generic Key Measures standard. Provide PROFESSIONAL-GRADE analysis with full traceability, validation, and reasoning.
+Analyze ALL {total_pages} architectural PDF pages and extract data using the Generic Key Measures standard ({fields_count} fields across 15 categories). Provide PROFESSIONAL-GRADE analysis with full traceability, validation, and reasoning.
 
 CRITICAL PROFESSIONAL REQUIREMENTS:
 
 1. SCALE IDENTIFICATION FIRST: Before ANY linear measurements, identify the drawing scale on each page. Document this in your reasoning.
 
-2. TRACEABILITY & REASONING: For EVERY extracted value, provide detailed reasoning explaining:
+2. HYBRID TEXT PRIORITY: If PyMuPDF-extracted text is present, read it FIRST and populate fields directly from it before consulting the image.
+
+3. TRACEABILITY & REASONING: For EVERY extracted value, provide detailed reasoning explaining:
    - Which page(s) the data was found on
-   - Exact location on the page
+   - Whether value came from embedded text (PyMuPDF) or visual interpretation
    - How the value was determined
 
-3. VALIDATION: If you calculate a value that contradicts a printed dimension, flag it.
+4. VALIDATION: If you calculate a value that contradicts a printed dimension, flag it.
 
-4. SANITY CHECKS: After extracting all data, perform these sanity checks:
-   - Does SL_TOTAL = SL_HS + SL_GAR? (if both present)
-   - Is EW_LF approximately 2×(WIDTH + DEPTH)?
-   - Do window/door totals match their components?
+5. SANITY CHECKS: After extracting all data, perform these sanity checks:
+   - Does SL_TOTAL = SL_HS + SL_GAR + SL_POR? (if components present)
+   - Is WE_TOTAL approximately 2×(WIDTH_FT + DEPTH_FT)?
+   - Do WIN_TOTAL = WIN_SINGLE + WIN_DOUBLE? Do DOOR_TOTAL = DOOR_EXT + DOOR_INT?
 
 ================================================================================
 FIELDS TO EXTRACT:

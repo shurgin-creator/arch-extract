@@ -321,7 +321,7 @@ Return ONLY a JSON object with this structure:
         # This should never be reached, but just in case
         raise RuntimeError(f"Failed consolidated extraction after {max_retries} attempts")
 
-    def _build_consolidated_system_prompt(self, extraction_fields: List[str], total_pages: int) -> str:
+   def _build_consolidated_system_prompt(self, extraction_fields: List[str], total_pages: int) -> str:
         """
         Build a professional-grade system prompt for consolidated analysis of all PDF pages.
         Includes AI reasoning, scaling validation, self-correction, and traceability.
@@ -337,116 +337,25 @@ PROFESSIONAL ACCURACY LEVEL - ANALYSIS REQUIREMENTS
 YOUR TASK:
 Analyze ALL {total_pages} architectural PDF pages together and extract data using the Generic Key Measures standard. Provide PROFESSIONAL-GRADE analysis with full traceability, validation, and reasoning.
 
-⚠️  CRITICAL PROFESSIONAL REQUIREMENTS:
+CRITICAL PROFESSIONAL REQUIREMENTS:
 
-1. **SCALE IDENTIFICATION FIRST**: Before ANY linear measurements, identify the drawing scale on each page (e.g., "1/4\" = 1'-0\"", "1/8\" = 1'-0\""). Document this in your reasoning.
+1. SCALE IDENTIFICATION FIRST: Before ANY linear measurements, identify the drawing scale on each page. Document this in your reasoning.
 
-2. **TRACEABILITY & REASONING**: For EVERY extracted value, provide detailed reasoning explaining:
+2. TRACEABILITY & REASONING: For EVERY extracted value, provide detailed reasoning explaining:
    - Which page(s) the data was found on
-   - Which sheet type (Floor Plan, Foundation Plan, Elevation, Section, etc.)
-   - Exact location on the page (e.g., "Area Tabulation table", "Dimension line", "Room label")
-   - How the value was determined (direct reading vs. calculation)
+   - Exact location on the page
+   - How the value was determined
 
-3. **VALIDATION AGAINST PRINTED DIMENSIONS**: If you calculate a value that contradicts a printed dimension, flag it and explain the discrepancy.
+3. VALIDATION: If you calculate a value that contradicts a printed dimension, flag it.
 
-4. **SELF-CORRECTION & SANITY CHECKS**: After extracting all data, perform these sanity checks:
+4. SANITY CHECKS: After extracting all data, perform these sanity checks:
    - Does SL_TOTAL = SL_HS + SL_GAR? (if both present)
-   - Is EW_LF approximately 2×(WIDTH + DEPTH)? (accounting for complex shapes)
+   - Is EW_LF approximately 2×(WIDTH + DEPTH)?
    - Do window/door totals match their components?
-   - Flag any inconsistencies in your reasoning
-
-5. **SMART CSV MAPPING**: Use Generic Key Measures codes strictly. If extracted data doesn't match a code, categorize as 'Other' but still include it.
 
 ================================================================================
-FIELDS TO EXTRACT (using Standard Codes):
+FIELDS TO EXTRACT:
 {fields_list}
-
-================================================================================
-PROFESSIONAL MEASUREMENT PROTOCOL
-================================================================================
-
-GENERAL INFORMATION (GEN):
-- PLAN_NO: Unique identifier for the plan (alphanumeric, e.g., A-101, PLAN-2024-001)
-- ELEV_VIEW: Elevation designation (North/South/East/West Elevation)
-- STORIES: Number of stories/levels (1, 2, 3, etc.)
-- WIDTH_FT: Overall width of structure in feet (typically east-west)
-- DEPTH_FT: Overall depth of structure in feet (typically north-south)
-- BATH_COUNT: Number of bathrooms (count fixture groups)
-- BED_COUNT: Number of bedrooms (rooms with closets)
-
-MEASUREMENTS - CONCRETE SLABS (SL_*):
-⚠️  SCALE VALIDATION REQUIRED - Always identify scale before area calculations
-
-- SL_HS (Concrete Slab - House): Primary residential slab for main structure
-  * Found in foundation plans marked "SLAB ON GRADE" or "CONCRETE SLAB"
-  * Calculate: length × width (in feet) → square feet (validate against scale)
-  * Exclude garage, porches, additions shown separately
-
-- SL_GAR (Concrete Slab - Garage): Separate garage or carport slab area
-  * Shown distinctly as "Garage Slab", "Driveway", or "SL_GAR"
-  * Often has different thickness or rebar pattern
-  * Calculate separately from house slab
-
-- SL_TOTAL (Concrete Slab - Total): Sum of all concrete slabs if both present
-  * SL_TOTAL = SL_HS + SL_GAR (validate this equation)
-
-MEASUREMENTS - WALLS (EW_LF, IW_LF):
-⚠️  SCALE CRITICAL - Wall lengths MUST be measured at identified scale
-
-- EW_LF (Exterior Wall Linear): Total linear feet of all outer/perimeter walls
-  * Method: Sum all exterior wall segments on floor plan using scale
-  * Forms building perimeter (≈ 2×WIDTH + 2×DEPTH, but may vary for complex shapes)
-  * Include all exterior corners and projections
-  * VALIDATE: Compare calculated perimeter to 2×(WIDTH + DEPTH)
-
-- IW_LF (Interior Wall Linear): Total linear feet of all interior partition walls
-  * Sum all interior walls on floor plan using scale
-  * Include walls separating rooms, closets, mechanical spaces
-  * Do NOT double-count shared walls (count once, not twice)
-
-MEASUREMENTS - WINDOWS (WIN_*):
-- WIN_SINGLE: Single-pane windows (count individual windows)
-- WIN_DOUBLE: Double-pane windows (separate from single-pane)
-- WIN_TOTAL: Total window count (WIN_SINGLE + WIN_DOUBLE)
-  * Method: Count window symbols on floor plan and elevation drawings
-  * Include: Single windows, bay windows (count each pane), picture windows
-  * Exclude: Doors with glass panels, skylights unless clearly window-type
-  * VALIDATE: WIN_TOTAL should equal WIN_SINGLE + WIN_DOUBLE
-
-MEASUREMENTS - DOORS (DOOR_*):
-- DOOR_EXT: Exterior doors (entry, patio doors, etc.)
-- DOOR_INT: Interior doors (room, closet, partition doors)
-- DOOR_TOTAL: Total door count (DOOR_EXT + DOOR_INT)
-  * Count door symbols on floor plan
-  * Garage doors typically count as 1 unit (not 2 panels)
-  * Exclude: Windows, vents unless they have door-like operation
-  * VALIDATE: DOOR_TOTAL should equal DOOR_EXT + DOOR_INT
-
-================================================================================
-PROFESSIONAL CONSOLIDATION RULES
-================================================================================
-
-Since you are analyzing ALL {total_pages} pages together:
-
-1. **Find the MOST COMPLETE information**: Look across all pages for the best data
-2. **Resolve conflicts**: If different pages show different values, choose the most detailed/clear one and explain why
-3. **Combine information**: Use data from different sheets (floor plans, elevations, sections, foundation)
-4. **Calculate totals**: Sum measurements that appear on multiple pages
-5. **Single result**: Return ONE consolidated JSON, not separate results per page
-6. **VALIDATION STATUS**: Flag any calculated values that contradict printed dimensions
-
-================================================================================
-MEASUREMENT LOCATION GUIDE
-================================================================================
-
-Where to find data in architectural plans:
-- Overall dimensions (WIDTH_FT, DEPTH_FT): FLOOR PLAN sheet
-- Slab area (SL_HS, SL_GAR): FOUNDATION PLAN sheet (look for sections A-A, B-B)
-- Wall linear (EW_LF, IW_LF): FLOOR PLAN sheet (scaled dimensions)
-- Window/Door counts (WIN_*, DOOR_*): FLOOR PLAN + ELEVATION sheets
-- Bathrooms/Bedrooms (BATH_COUNT, BED_COUNT): FLOOR PLAN sheet (room labels)
-- Stories: SECTION drawings (vertical slices through building)
-- Elevation labels (ELEV_VIEW): ELEVATION SHEET headers
 
 ================================================================================
 PROFESSIONAL CONFIDENCE SCORING
@@ -458,11 +367,6 @@ PROFESSIONAL CONFIDENCE SCORING
 40-59%:  Data estimated or requires significant interpretation
 0-39%:   Data cannot be reliably determined from visible plans
 0%:      Data not present in provided image (return null)
-
-⚠️  ADDITIONAL VALIDATION FLAGS:
-- "CALCULATED_CONFLICT": Calculated value contradicts printed dimension
-- "SCALE_UNCERTAIN": Scale not clearly identified on page
-- "SANITY_CHECK_FAILED": Self-correction found inconsistency
 
 ================================================================================
 PROFESSIONAL RESPONSE FORMAT
@@ -484,304 +388,23 @@ Map field names/codes to this ENHANCED structure:
             "reasoning": "Found on Page 1, Title Block, clearly printed as plan identifier",
             "validation_status": "verified",
             "page_reference": "Page 1"
-        }},
-        "ELEV_VIEW": {{
-            "code": "ELEV_VIEW",
-            "measure_name": "Elevation",
-            "value": "North Elevation",
-            "unit": "",
-            "confidence": 90,
-            "category": "General",
-            "reasoning": "Found on Page 3, Elevation Sheet header, labeled as 'North Elevation'",
-            "validation_status": "verified",
-            "page_reference": "Page 3"
-        }},
-        "WIDTH_FT": {{
-            "code": "WIDTH_FT",
-            "measure_name": "Width",
-            "value": "45.5",
-            "unit": "FT",
-            "confidence": 85,
-            "category": "General",
-            "reasoning": "Found on Page 2, Floor Plan, dimensioned as 45'-6\\" overall width. Scale identified as 1/4\\" = 1'-0\\"",
-            "validation_status": "verified",
-            "page_reference": "Page 2"
-        }},
-        "SL_HS": {{
-            "code": "SL_HS",
-            "measure_name": "Concrete Slab Area - House",
-            "value": "1847.5",
-            "unit": "SF",
-            "confidence": 85,
-            "category": "Measurements",
-            "reasoning": "Found on Page 4, Foundation Plan, Area Tabulation table shows 1847.5 SF for house slab. Scale verified as 1/4\\" = 1'-0\\"",
-            "validation_status": "verified",
-            "page_reference": "Page 4"
-        }},
-        "EW_LF": {{
-            "code": "EW_LF",
-            "measure_name": "Exterior Wall Linear Feet",
-            "value": "312.5",
-            "unit": "LF",
-            "confidence": 80,
-            "category": "Measurements",
-            "reasoning": "Calculated from Page 2, Floor Plan using 1/4\\" = 1'-0\\" scale. Sum of all exterior wall segments = 312.5 LF. Validates against perimeter calculation: 2×(45.5+32.3) = 155.6 LF expected vs 312.5 LF actual (complex shape accounted for)",
-            "validation_status": "calculated_valid",
-            "page_reference": "Page 2"
-        }},
-        "CALCULATED_CONFLICT_FIELD": {{
-            "code": "FIELD_CODE",
-            "measure_name": "Field Name",
-            "value": "calculated_value",
-            "unit": "UOM",
-            "confidence": 45,
-            "category": "Measurements",
-            "reasoning": "Calculated value contradicts printed dimension on Page 2. Calculated: 150 LF, Printed: 145 LF. Discrepancy may be due to rounding or measurement error",
-            "validation_status": "calculated_conflict",
-            "page_reference": "Page 2",
-            "conflict_note": "Calculated 150 LF vs printed 145 LF"
-        }},
-        "SANITY_CHECK_FAILED": {{
-            "code": "SL_TOTAL",
-            "measure_name": "Concrete Slab Area - Total",
-            "value": "2200.0",
-            "unit": "SF",
-            "confidence": 60,
-            "category": "Measurements",
-            "reasoning": "SL_HS (1847.5) + SL_GAR (400.0) = 2247.5 SF, but calculated total shows 2200.0 SF. Inconsistency detected in sanity check",
-            "validation_status": "sanity_check_failed",
-            "page_reference": "Page 4",
-            "sanity_check": "SL_TOTAL should equal SL_HS + SL_GAR (2247.5 SF), but shows 2200.0 SF"
-        }},
-        "OTHER_FIELD": {{
-            "code": "OTHER_ROOF_AREA",
-            "measure_name": "Roof Area",
-            "value": "2100.0",
-            "unit": "SF",
-            "confidence": 75,
-            "category": "Other",
-            "reasoning": "Found on Page 5, Roof Plan, calculated from roof outline dimensions. Not in Generic Key Measures CSV, categorized as Other",
-            "validation_status": "verified",
-            "page_reference": "Page 5"
-        }},
-        "FIELD_NOT_PRESENT": {{
-            "code": "FIELD_NOT_PRESENT",
-            "measure_name": "Field Name",
-            "value": null,
-            "unit": "UOM",
-            "confidence": 0,
-            "category": "Category",
-            "reasoning": "Field not found on any of the {total_pages} pages reviewed",
-            "validation_status": "not_found",
-            "page_reference": "N/A"
         }}
     }}
 }}
 
-================================================================================
-PROFESSIONAL VALIDATION STATUS CODES
-================================================================================
-
+PROFESSIONAL VALIDATION STATUS CODES (Must be one of these):
 - "verified": Data directly read from plans with high confidence
 - "calculated_valid": Calculated value that validates against other measurements
-- "calculated_conflict": Calculated value contradicts printed dimension (see conflict_note)
-- "sanity_check_failed": Self-correction found inconsistency (see sanity_check)
+- "calculated_conflict": Calculated value contradicts printed dimension
+- "sanity_check_failed": Self-correction found inconsistency
 - "scale_uncertain": Scale not clearly identified (may affect accuracy)
 - "inferred": Data inferred from partial information
 - "not_found": Data not present in provided pages
 
-CRITICAL PROFESSIONAL REQUIREMENTS:
-- Include 'reasoning' field for EVERY extracted value explaining source and method
-- Include 'validation_status' for quality control
-- Include 'page_reference' showing which page(s) data came from
-- Perform and document all sanity checks
-- Flag any conflicts or inconsistencies
-- Use Generic Key Measures codes strictly, categorize unmatched data as 'Other'
+CRITICAL REQUIREMENTS:
+- Use standardized codes
 - ONLY return JSON—no other text
 - CONSOLIDATE from ALL {total_pages} pages into ONE professional-grade result"""
-        """
-        Build a detailed system prompt for Gemini based on Generic Key Measures.
-
-        Args:
-            extraction_fields: Fields to extract (field names/codes)
-
-        Returns:
-            System prompt string
-        """
-        fields_list = "\n".join([f"- {field}" for field in extraction_fields])
-
-        return f"""You are an expert architectural plan analyzer and data extractor with deep knowledge of building plans, codes, and standards.
-
-YOUR TASK:
-Analyze the provided architectural PDF images and extract specific data using the Generic Key Measures standard. Use standardized field codes to classify data based on the reference CSV files.
-
-FIELDS TO EXTRACT (using Standard Codes):
-{fields_list}
-
-================================================================================
-GENERIC KEY MEASURES - STANDARDIZED CODES REFERENCE
-================================================================================
-
-GENERAL INFORMATION (GEN):
-- PLAN_NO: Unique identifier for the plan (alphanumeric, e.g., A-101, PLAN-2024-001)
-- ELEV_VIEW: Elevation designation (North/South/East/West Elevation)
-- STORIES: Number of stories/levels (1, 2, 3, etc.)
-- WIDTH_FT: Overall width of structure in feet (typically east-west)
-- DEPTH_FT: Overall depth of structure in feet (typically north-south)
-- BATH_COUNT: Number of bathrooms (count fixture groups)
-- BED_COUNT: Number of bedrooms (rooms with closets)
-
-MEASUREMENTS - CONCRETE SLABS (SL_*):
-⚠️  CRITICAL - Distinguish slab types:
-
-- SL_HS (Concrete Slab - House): Primary residential slab for main structure
-  * Found in foundation plans marked "SLAB ON GRADE" or "CONCRETE SLAB"
-  * Calculate: length × width (in feet) → square feet
-  * Exclude garage, porches, additions shown separately
-
-- SL_GAR (Concrete Slab - Garage): Separate garage or carport slab area
-  * Shown distinctly as "Garage Slab", "Driveway", or "SL_GAR"
-  * Often has different thickness or rebar pattern
-  * Calculate separately from house slab
-
-- SL_TOTAL (Concrete Slab - Total): Sum of all concrete slabs if both present
-  * SL_TOTAL = SL_HS + SL_GAR
-
-MEASUREMENTS - WALLS (EW_LF, IW_LF):
-- EW_LF (Exterior Wall Linear): Total linear feet of all outer/perimeter walls
-  * Method: Sum all exterior wall segments on floor plan
-  * Forms building perimeter (≈ 2×WIDTH + 2×DEPTH, but may vary for complex shapes)
-  * Include all exterior corners and projections
-
-- IW_LF (Interior Wall Linear): Total linear feet of all interior partition walls
-  * Sum all interior walls on floor plan
-  * Include walls separating rooms, closets, mechanical spaces
-  * Do NOT double-count shared walls (count once, not twice)
-
-MEASUREMENTS - WINDOWS (WIN_*):
-- WIN_SINGLE: Single-pane windows (count individual windows)
-- WIN_DOUBLE: Double-pane windows (separate from single-pane)
-- WIN_TOTAL: Total window count (WIN_SINGLE + WIN_DOUBLE)
-  * Method: Count window symbols on floor plan and elevation drawings
-  * Include: Single windows, bay windows (count each pane), picture windows
-  * Exclude: Doors with glass panels, skylights unless clearly window-type
-  * Note: Corner windows—be careful not to double-count
-
-MEASUREMENTS - DOORS (DOOR_*):
-- DOOR_EXT: Exterior doors (entry, patio doors, etc.)
-- DOOR_INT: Interior doors (room, closet, partition doors)
-- DOOR_TOTAL: Total door count (DOOR_EXT + DOOR_INT)
-  * Count door symbols on floor plan
-  * Garage doors typically count as 1 unit (not 2 panels)
-  * Exclude: Windows, vents unless they have door-like operation
-
-================================================================================
-MEASUREMENT LOCATION GUIDE
-================================================================================
-
-Where to find data in architectural plans:
-- Overall dimensions (WIDTH_FT, DEPTH_FT): FLOOR PLAN sheet
-- Slab area (SL_HS, SL_GAR): FOUNDATION PLAN sheet (look for sections A-A, B-B)
-- Wall linear (EW_LF, IW_LF): FLOOR PLAN sheet (scaled dimensions)
-- Window/Door counts (WIN_*, DOOR_*): FLOOR PLAN + ELEVATION sheets
-- Bathrooms/Bedrooms (BATH_COUNT, BED_COUNT): FLOOR PLAN sheet (room labels)
-- Stories: SECTION drawings (vertical slices through building)
-- Elevation labels (ELEV_VIEW): ELEVATION SHEET headers
-
-================================================================================
-CONFIDENCE SCORING RULES
-================================================================================
-
-90-100%: Data clearly marked, dimensioned, or directly stated with codes
-75-89%:  Data calculated from clear dimensions; minor ambiguity
-60-74%:  Data inferred from partial information or standard practices
-40-59%:  Data estimated or requires significant interpretation
-0-39%:   Data cannot be reliably determined from visible plans
-0%:      Data not present in provided image (return null)
-
-Special cases:
-- If value cannot be determined: set "value" to null with confidence 0
-- If conflicting information exists across sheets: report highest confidence value
-
-================================================================================
-RESPONSE FORMAT
-================================================================================
-
-Return ONLY valid JSON. No preamble. No explanations. Only JSON.
-
-Map field names/codes to this structure:
-
-{{
-    "extracted_fields": {{
-        "PLAN_NO": {{
-            "code": "PLAN_NO",
-            "measure_name": "Plan Number",
-            "value": "A-101",
-            "unit": "",
-            "confidence": 95,
-            "category": "General"
-        }},
-        "ELEV_VIEW": {{
-            "code": "ELEV_VIEW",
-            "measure_name": "Elevation",
-            "value": "North Elevation",
-            "unit": "",
-            "confidence": 90,
-            "category": "General"
-        }},
-        "WIDTH_FT": {{
-            "code": "WIDTH_FT",
-            "measure_name": "Width",
-            "value": "45.5",
-            "unit": "FT",
-            "confidence": 85,
-            "category": "General"
-        }},
-        "SL_HS": {{
-            "code": "SL_HS",
-            "measure_name": "Concrete Slab Area - House",
-            "value": "1847.5",
-            "unit": "SF",
-            "confidence": 85,
-            "category": "Measurements",
-            "notes": "House slab; excludes garage"
-        }},
-        "SL_GAR": {{
-            "code": "SL_GAR",
-            "measure_name": "Concrete Slab Area - Garage",
-            "value": "400.0",
-            "unit": "SF",
-            "confidence": 80,
-            "category": "Measurements",
-            "notes": "Separate garage slab"
-        }},
-        "SL_TOTAL": {{
-            "code": "SL_TOTAL",
-            "measure_name": "Concrete Slab Area - Total",
-            "value": "2247.5",
-            "unit": "SF",
-            "confidence": 82,
-            "category": "Measurements"
-        }},
-        "FIELD_NOT_PRESENT": {{
-            "code": "FIELD_NOT_PRESENT",
-            "measure_name": "Field Name",
-            "value": null,
-            "unit": "UOM",
-            "confidence": 0,
-            "category": "Category"
-        }}
-    }}
-}}
-
-CRITICAL REQUIREMENTS:
-- Use standardized codes (SL_HS, EW_LF, WIN_TOTAL, etc.)
-- Include all extracted fields in response
-- Map to proper category (General, Measurements)
-- Provide appropriate units (SF, LF, FT, or empty string)
-- Set confidence to 0 for null values
-- Include measure_name for clarity
-- ONLY return JSON—no other text"""
 
     def _parse_response(self, response, extraction_fields: List[str]) -> Dict[str, Dict[str, any]]:
         """

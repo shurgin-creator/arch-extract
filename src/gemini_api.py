@@ -321,7 +321,7 @@ Return ONLY a JSON object with this structure:
         # This should never be reached, but just in case
         raise RuntimeError(f"Failed consolidated extraction after {max_retries} attempts")
 
-   def _build_consolidated_system_prompt(self, extraction_fields: List[str], total_pages: int) -> str:
+    def _build_consolidated_system_prompt(self, extraction_fields: List[str], total_pages: int) -> str:
         """
         Build a professional-grade system prompt for consolidated analysis of all PDF pages.
         Includes AI reasoning, scaling validation, self-correction, and traceability.

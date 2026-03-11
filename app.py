@@ -3,12 +3,14 @@ Streamlit application for extracting architectural data from PDF plans.
 Professional Project Management System with persistent storage.
 """
 
+import gc
 import streamlit as st
 import os
 import pandas as pd
 import json
 from io import BytesIO
 from datetime import datetime
+import time
 import traceback
 from dotenv import load_dotenv
 
@@ -298,10 +300,16 @@ def format_extraction_results(results: dict) -> pd.DataFrame:
     print(f"Created {len(rows)} rows")
     df = pd.DataFrame(rows)
 
-    # Sort by category, then by confidence level (descending)
+    # Cast mixed-type columns to str to prevent PyArrow ArrowInvalid crashes
+    # (Gemini returns numeric or string values; Arrow infers the wrong dtype)
+    for col in ("Value", "Unit", "Confidence Level", "Category", "Page Reference"):
+        if col in df.columns:
+            df[col] = df[col].astype(str)
+
+    # Sort by category, then confidence descending; drop internal helper columns
     if not df.empty and "_confidence_numeric" in df.columns:
         df = df.sort_values(by=["Category", "_confidence_numeric"], ascending=[True, False])
-        df = df.drop("_confidence_numeric", axis=1)
+        df = df.drop(columns=["_confidence_numeric", "_validation_status", "_field_code"], errors="ignore")
 
     print(f"Final DataFrame shape: {df.shape}")
     print(f"Final DataFrame columns: {list(df.columns)}")
@@ -321,7 +329,7 @@ def create_excel_export(results_df: pd.DataFrame, raw_results: dict) -> BytesIO:
                     f"{results_df['Confidence Level'].str.rstrip('%').astype(float).mean():.1f}%",
                     len(results_df[results_df["Confidence Level"].str.rstrip('%').astype(float) > 80]),
                     len(results_df[results_df["Validation Status"].isin(["calculated_conflict", "sanity_check_failed", "scale_uncertain"])]),
-                    len(st.session_state.extracted_images) if hasattr(st.session_state, 'extracted_images') else "N/A"
+                    st.session_state.get("total_pages", "N/A")
                 ]
             }
             summary_df = pd.DataFrame(summary_data)
@@ -375,7 +383,13 @@ def initialize_session_state():
     if 'pdf_processed' not in st.session_state:
         st.session_state.pdf_processed = False
     if 'extracted_images' not in st.session_state:
-        st.session_state.extracted_images = []
+        st.session_state.extracted_images = []  # kept for compat; not bulk-loaded
+    if 'pdf_bytes_for_refine' not in st.session_state:
+        st.session_state.pdf_bytes_for_refine = None
+    if 'pdf_dpi_for_refine' not in st.session_state:
+        st.session_state.pdf_dpi_for_refine = 200
+    if 'total_pages' not in st.session_state:
+        st.session_state.total_pages = 0
     if 'current_project_id' not in st.session_state:
         st.session_state.current_project_id = None
     if 'current_project_name' not in st.session_state:
@@ -485,20 +499,18 @@ def main():
                     print(f"DPI setting: {dpi}")
 
                     try:
-                        # First, quickly determine page count for dynamic messaging
+                        # Get page count cheaply (no image rendering) for the spinner message
                         pdf_processor_temp = PDFProcessor(dpi=dpi, fmt="png")
-                        pdf_bytes = uploaded_file.read()
-                        temp_images = pdf_processor_temp.convert_pdf_bytes(pdf_bytes)
-                        page_count = len(temp_images)
-                        
-                        # Reset file pointer for actual processing
+                        pdf_bytes_preview = uploaded_file.read()
+                        page_count = pdf_processor_temp.get_page_count(pdf_bytes_preview)
+                        del pdf_bytes_preview  # Free immediately — only needed for count
+
+                        # Reset file pointer so extract_data_from_pdf can read it
                         uploaded_file.seek(0)
-                        
-                        # Calculate estimated time (single API call, but longer processing time)
-                        # Estimate ~2-3 minutes for consolidated analysis regardless of page count
-                        estimated_minutes = 3
-                        
-                        with st.spinner(f"🔄 Analyzing all {page_count} pages with Gemini... this will take approx {estimated_minutes} minutes. Please do not refresh."):
+
+                        estimated_minutes = max(1, page_count // 4)
+
+                        with st.spinner(f"🔄 Analyzing {page_count} pages lazily with Gemini (~{estimated_minutes} min). Please do not refresh."):
                             extract_data_from_pdf(
                                 uploaded_file,
                                 selected_categories,
@@ -547,11 +559,17 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
 
         pdf_processor = PDFProcessor(dpi=dpi, fmt="png")
         pdf_bytes = uploaded_file.read()
-        images = pdf_processor.convert_pdf_bytes(pdf_bytes)
-        st.session_state.extracted_images = images
 
-        add_log_entry(f"PDF converted to {len(images)} page(s)")
-        status_text.text(f"✓ PDF converted to {len(images)} page(s)")
+        # Count pages cheaply (no rendering) so we can show progress and use lazy iterator
+        total_pages_count = pdf_processor.get_page_count(pdf_bytes)
+
+        # Store pdf_bytes for on-demand rendering during field refinement
+        st.session_state.pdf_bytes_for_refine = pdf_bytes
+        st.session_state.pdf_dpi_for_refine = dpi
+        st.session_state.total_pages = total_pages_count
+
+        add_log_entry(f"PDF opened: {total_pages_count} pages (lazy processing — images never all in memory)")
+        status_text.text(f"✓ PDF opened: {total_pages_count} page(s) — lazy mode active")
         progress_bar.progress(40)
 
         # Step 2: Initialize Gemini API
@@ -576,29 +594,44 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
                     selected_field_defs[code] = field
 
         # Step 4: Extract data
-        add_log_entry(f"Starting paged analysis of {len(images)} pages...")
-        status_text.text("🔍 Extracting data from images (page by page)...")
+        add_log_entry(f"Starting lazy extraction of {total_pages_count} pages...")
+        status_text.text("🔍 Extracting data lazily (one page at a time)...")
         progress_bar.progress(70)
 
         # Create progress tracking for paged extraction
         progress_placeholder = st.empty()
         status_placeholder = st.empty()
-        
+
         # Progress callback for paged extraction
         def update_progress(page_num, total_pages):
             progress_percent = 70 + int((page_num / total_pages) * 15)  # 70% to 85%
             progress_bar.progress(progress_percent)
             progress_placeholder.text(f"📄 Processing page {page_num}/{total_pages}...")
-            status_placeholder.text(f"Rate-limited API calls with 15s delays between pages...")
+            status_placeholder.text("Rate-limited API calls with 15s delays between pages...")
             add_log_entry(f"Completed page {page_num}/{total_pages}")
 
-        # Use paged extraction method (one page at a time with delays)
-        results = extractor.extract_data_from_multiple_pages(images, fields_to_extract, update_progress)
-        add_log_entry("Paged data extraction completed successfully")
+        # Lazy extraction: iter_pages yields one (image, text) tuple at a time,
+        # each freed from memory before the next page is loaded.
+        page_iter = pdf_processor.iter_pages(pdf_bytes)
+        try:
+            results, quota_warning = extractor.extract_data_from_multiple_pages(
+                page_iter, fields_to_extract, update_progress, total_pages_count
+            )
+        except Exception as api_err:
+            progress_placeholder.empty()
+            status_placeholder.empty()
+            add_log_entry(f"API extraction failed: {str(api_err)}")
+            st.error(f"❌ Gemini API extraction failed: {str(api_err)}")
+            st.info("Check the terminal/logs for the full exception traceback.")
+            return
 
-        # Clear progress indicators
+        if quota_warning:
+            st.warning(f"⚠️ {quota_warning}")
+            add_log_entry(f"Quota warning: {quota_warning}")
+
         progress_placeholder.empty()
         status_placeholder.empty()
+        add_log_entry("Lazy data extraction completed successfully")
 
         # Debug: Print results to terminal
         print("=== AI EXTRACTION RESULTS ===")
@@ -622,7 +655,7 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
             project_name=project_name,
             filename=uploaded_file.name,
             analysis_json=results,
-            total_pages=len(images)
+            total_pages=total_pages_count
         )
         st.session_state.current_project_id = project_id
         st.session_state.current_project_name = project_name
@@ -631,8 +664,6 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
         progress_bar.progress(100)
         status_text.text("✓ Data extraction & saving complete!")
 
-        # Clear progress indicators after a moment
-        import time
         time.sleep(1)
         progress_bar.empty()
         status_text.empty()
@@ -647,9 +678,14 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
         st.error(f"⚠️ Configuration Error: {str(e)}")
         st.info("Please ensure GEMINI_API_KEY is set in Streamlit secrets or your .env file")
     except Exception as e:
-        add_log_entry(f"Error: {str(e)}")
-        st.error(f"❌ Error during extraction: {str(e)}")
-        st.exception(e)
+        error_msg = str(e)
+        add_log_entry(f"Error: {error_msg}")
+        if "Daily API quota exhausted" in error_msg or "PerDay" in error_msg or "429" in error_msg:
+            st.error("⚠️ Google Gemini API quota exceeded (free tier: 20 requests/day). Please wait until tomorrow or upgrade your API plan.")
+            st.info("Your PDF was processed but the AI extraction step was blocked by the quota limit.")
+        else:
+            st.error(f"❌ Error during extraction: {error_msg}")
+            st.exception(e)
 
 
 def refine_field(field_code: str, field_row: pd.Series, user_feedback: str, results_df: pd.DataFrame):
@@ -662,23 +698,34 @@ def refine_field(field_code: str, field_row: pd.Series, user_feedback: str, resu
             st.error("No active project. Please extract data first.")
             return
 
-        if not st.session_state.extracted_images:
-            st.error("No PDF images available for re-analysis.")
+        if not st.session_state.get("pdf_bytes_for_refine"):
+            st.error("PDF data not available for re-analysis. Please re-upload the PDF.")
             return
 
         # Show processing message
         with st.spinner(f"🔄 Re-analyzing {field_code} with your feedback..."):
-            add_log_entry(f"Initializing Gemini API for refinement...")
+            add_log_entry("Initializing Gemini API for refinement...")
             extractor = GeminiDataExtractor(api_key=st.secrets.get("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
+
+            # Render images on-demand for refinement (not stored between runs)
+            add_log_entry("Rendering PDF pages for re-analysis...")
+            refine_processor = PDFProcessor(
+                dpi=st.session_state.get("pdf_dpi_for_refine", 200), fmt="png"
+            )
+            refine_images = refine_processor.convert_pdf_bytes(st.session_state.pdf_bytes_for_refine)
 
             add_log_entry(f"Sending refinement request with user feedback...")
             refined_field = extractor.refine_field_value(
-                images=st.session_state.extracted_images,
+                images=refine_images,
                 field_code=field_code,
                 original_value=str(field_row["Value"]),
                 user_feedback=user_feedback,
                 original_reasoning=field_row["AI Reasoning / Source"]
             )
+
+            # Free rendered images immediately after the API call
+            del refine_images
+            gc.collect()
 
             add_log_entry(f"Refinement completed for {field_code}")
 

@@ -35,18 +35,47 @@ st.markdown("""
 <style>
     /* General styling */
     body {
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        font-family: 'Inter', 'Segoe UI', sans-serif;
     }
-    
+
+    /* ── Auth page hero ── */
+    .auth-hero {
+        text-align: center;
+        padding: 48px 0 32px;
+    }
+    .auth-logo {
+        font-size: 3rem;
+        line-height: 1;
+    }
+    .auth-title {
+        font-size: 2rem;
+        font-weight: 700;
+        color: #0068c9;
+        margin: 8px 0 4px;
+    }
+    .auth-subtitle {
+        font-size: 1rem;
+        color: #666;
+        margin-bottom: 32px;
+    }
+    .auth-card {
+        background: #ffffff;
+        border-radius: 12px;
+        padding: 32px;
+        box-shadow: 0 4px 24px rgba(0,104,201,0.10);
+        border: 1px solid #e8edf2;
+    }
+
     .main-header {
         font-size: 2.5rem;
-        font-weight: bold;
-        margin-bottom: 10px;
-        background: linear-gradient(90deg, #2c3e50, #3498db);
+        font-weight: 800;
+        margin-bottom: 6px;
+        background: linear-gradient(90deg, #0068c9, #004fa3);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
+        letter-spacing: -0.5px;
     }
-    
+
     /* Confidence badges */
     .confidence-high {
         background-color: #d4edda;
@@ -56,7 +85,7 @@ st.markdown("""
         font-weight: bold;
         display: inline-block;
     }
-    
+
     .confidence-med {
         background-color: #fff3cd;
         color: #856404;
@@ -65,7 +94,7 @@ st.markdown("""
         font-weight: bold;
         display: inline-block;
     }
-    
+
     .confidence-low {
         background-color: #f8d7da;
         color: #721c24;
@@ -74,33 +103,22 @@ st.markdown("""
         font-weight: bold;
         display: inline-block;
     }
-    
+
     /* Validation status badges */
-    .validation-verified {
-        background-color: #d4edda;
-        border-left: 4px solid #28a745;
-    }
-    
-    .validation-conflict {
-        background-color: #f8d7da;
-        border-left: 4px solid #dc3545;
-    }
-    
-    .validation-warning {
-        background-color: #fff3cd;
-        border-left: 4px solid #ffc107;
-    }
-    
+    .validation-verified  { background-color: #d4edda; border-left: 4px solid #28a745; }
+    .validation-conflict  { background-color: #f8d7da; border-left: 4px solid #dc3545; }
+    .validation-warning   { background-color: #fff3cd; border-left: 4px solid #ffc107; }
+
     /* Metric boxes */
     .metric-box {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #0068c9 0%, #004fa3 100%);
         padding: 20px;
         border-radius: 10px;
         margin: 10px 0;
         color: white;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        box-shadow: 0 4px 12px rgba(0,104,201,0.25);
     }
-    
+
     /* Low confidence warning */
     .low-confidence-warning {
         background-color: #fff3cd;
@@ -109,12 +127,12 @@ st.markdown("""
         border-radius: 4px;
         margin: 10px 0;
     }
-    
+
     /* Live log styling */
     .live-log {
         background-color: #f8f9fa;
         border: 1px solid #dee2e6;
-        border-radius: 4px;
+        border-radius: 6px;
         padding: 12px;
         font-family: 'Courier New', monospace;
         font-size: 12px;
@@ -122,69 +140,44 @@ st.markdown("""
         overflow-y: auto;
     }
 
-    /* Table styling for polished appearance */
-    table {
-        width: 100% !important;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-    th {
-        background-color: #f0f2f6 !important;
-        font-weight: bold !important;
-    }
-    .refine-button {
-        background-color: transparent;
-        border: none;
-        color: #3498db;
-        cursor: pointer;
-        font-size: 0.9rem;
-    }
-    
-    
-    /* Tab styling */
-    .stTabs [data-baseweb="tab-list"] {
-        background-color: #f0f2f6;
-        border-radius: 8px;
-    }
-    
     /* Table styling */
+    table { width: 100% !important; }
+    th    { background-color: #f0f2f6 !important; font-weight: 700 !important; }
+
+    /* Tab list accent */
+    .stTabs [data-baseweb="tab-list"] {
+        background-color: #eef2f7;
+        border-radius: 8px;
+        gap: 4px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 6px;
+        font-weight: 600;
+    }
+
+    /* DataGrid card */
     .dataframe {
         border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
     }
-    
-    /* Button styling */
-    .stButton > button {
-        background-color: #3498db;
-        color: white;
-        border-radius: 6px;
-        border: none;
-        padding: 8px 16px;
-        font-weight: bold;
-        transition: all 0.3s ease;
-    }
-    
-    .stButton > button:hover {
-        background-color: #2980b9;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-    }
-    
+
     /* Sidebar styling */
     .sidebar-title {
-        font-size: 1.2rem;
-        font-weight: bold;
-        margin-top: 20px;
-        margin-bottom: 10px;
-        color: #2c3e50;
-        border-bottom: 2px solid #3498db;
-        padding-bottom: 8px;
+        font-size: 1.1rem;
+        font-weight: 700;
+        margin-top: 16px;
+        margin-bottom: 8px;
+        color: #1f1f2e;
+        border-bottom: 2px solid #0068c9;
+        padding-bottom: 6px;
     }
-    
+
     .project-item {
-        background-color: #ecf0f1;
+        background-color: #eef2f7;
         padding: 10px;
-        border-radius: 4px;
-        margin: 8px 0;
-        border-left: 4px solid #3498db;
+        border-radius: 6px;
+        margin: 6px 0;
+        border-left: 4px solid #0068c9;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -394,9 +387,14 @@ def get_low_confidence_items(results_df: pd.DataFrame) -> pd.DataFrame:
 
 def show_auth_page():
     """Full-page login/signup UI shown when the user is not authenticated."""
-    st.markdown("<div class='main-header'>📐 Architectural PDF Data Extractor</div>", unsafe_allow_html=True)
-    st.markdown("Please log in or create an account to continue.")
-    st.divider()
+    # Hero section — centered, full width
+    st.markdown("""
+    <div class="auth-hero">
+        <div class="auth-logo">📐</div>
+        <div class="auth-title">Architectural PDF Data Extractor</div>
+        <div class="auth-subtitle">AI-powered data extraction from architectural plans &amp; drawings</div>
+    </div>
+    """, unsafe_allow_html=True)
 
     try:
         supabase = get_supabase()
@@ -405,36 +403,41 @@ def show_auth_page():
         st.info("Add SUPABASE_URL and SUPABASE_KEY to your Streamlit secrets.")
         return
 
-    tab_login, tab_signup = st.tabs(["Log In", "Sign Up"])
+    # Center the auth card using columns
+    _, center_col, _ = st.columns([1, 2, 1])
+    with center_col:
+        st.markdown('<div class="auth-card">', unsafe_allow_html=True)
+        tab_login, tab_signup = st.tabs(["Log In", "Sign Up"])
 
-    with tab_login:
-        email = st.text_input("Email", key="login_email")
-        password = st.text_input("Password", type="password", key="login_password")
-        if st.button("Log In", type="primary", use_container_width=True, key="login_btn"):
-            if not email or not password:
-                st.error("Please enter both email and password.")
-            else:
-                try:
-                    response = supabase.auth.sign_in_with_password({"email": email, "password": password})
-                    st.session_state.user = response.user
-                    st.session_state.supabase_access_token = response.session.access_token
-                    st.session_state.supabase_refresh_token = response.session.refresh_token
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Login failed: {str(e)}")
+        with tab_login:
+            email = st.text_input("Email", key="login_email", placeholder="you@example.com")
+            password = st.text_input("Password", type="password", key="login_password", placeholder="••••••••")
+            if st.button("Log In", type="primary", use_container_width=True, key="login_btn"):
+                if not email or not password:
+                    st.error("Please enter both email and password.")
+                else:
+                    try:
+                        response = supabase.auth.sign_in_with_password({"email": email, "password": password})
+                        st.session_state.user = response.user
+                        st.session_state.supabase_access_token = response.session.access_token
+                        st.session_state.supabase_refresh_token = response.session.refresh_token
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Login failed: {str(e)}")
 
-    with tab_signup:
-        email_s = st.text_input("Email", key="signup_email")
-        password_s = st.text_input("Password (min 6 chars)", type="password", key="signup_password")
-        if st.button("Create Account", use_container_width=True, key="signup_btn"):
-            if not email_s or not password_s:
-                st.error("Please fill in all fields.")
-            else:
-                try:
-                    supabase.auth.sign_up({"email": email_s, "password": password_s})
-                    st.success("✅ Account created! Check your email to confirm, then log in.")
-                except Exception as e:
-                    st.error(f"Sign-up failed: {str(e)}")
+        with tab_signup:
+            email_s = st.text_input("Email", key="signup_email", placeholder="you@example.com")
+            password_s = st.text_input("Password (min 6 chars)", type="password", key="signup_password", placeholder="••••••••")
+            if st.button("Create Account", type="primary", use_container_width=True, key="signup_btn"):
+                if not email_s or not password_s:
+                    st.error("Please fill in all fields.")
+                else:
+                    try:
+                        supabase.auth.sign_up({"email": email_s, "password": password_s})
+                        st.success("✅ Account created! Check your email to confirm, then log in.")
+                    except Exception as e:
+                        st.error(f"Sign-up failed: {str(e)}")
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 def initialize_session_state():
@@ -906,6 +909,71 @@ def refine_field(field_code: str, field_row: pd.Series, user_feedback: str, resu
         st.exception(e)
 
 
+def _apply_confidence_style(df: pd.DataFrame):
+    """Return a Pandas Styler with green/yellow/red coloring on the Confidence Level column."""
+    col = "Confidence Level"
+    if col not in df.columns:
+        return df.style
+
+    def _color(val: str) -> str:
+        try:
+            num = int(str(val).rstrip("%").strip())
+        except Exception:
+            return "background-color: #f8d7da; color: #721c24; font-weight: bold;"
+        if num == 100:
+            return "background-color: #d4edda; color: #155724; font-weight: bold;"
+        elif num >= 80:
+            return "background-color: #fff3cd; color: #856404; font-weight: bold;"
+        else:
+            return "background-color: #f8d7da; color: #721c24; font-weight: bold;"
+
+    try:
+        return df.style.map(_color, subset=[col])
+    except AttributeError:
+        # pandas < 2.1 uses applymap
+        return df.style.applymap(_color, subset=[col])
+
+
+def display_categorized_dataframe(results_df: pd.DataFrame):
+    """
+    Split results_df by Category and render each category in its own st.tab.
+    Each tab's table has confidence color-coding via Pandas Styler.
+    """
+    if results_df.empty:
+        st.info("No data to display.")
+        return
+
+    categories = sorted(results_df["Category"].dropna().unique().tolist())
+    if not categories:
+        categories = ["All"]
+
+    show_cols = [c for c in [
+        "Code", "Key Measure", "Value", "Unit",
+        "Confidence Level", "Page Reference", "AI Reasoning / Source",
+    ] if c in results_df.columns]
+
+    col_config = {
+        "Code":                  st.column_config.TextColumn("Code",        width="small"),
+        "Key Measure":           st.column_config.TextColumn("Measure",     width="medium"),
+        "Value":                 st.column_config.TextColumn("Value",       width="small"),
+        "Unit":                  st.column_config.TextColumn("Unit",        width="small"),
+        "Confidence Level":      st.column_config.TextColumn("Confidence",  width="small"),
+        "Page Reference":        st.column_config.TextColumn("Page",        width="small"),
+        "AI Reasoning / Source": st.column_config.TextColumn("AI Reasoning / Source", width="large"),
+    }
+
+    tabs = st.tabs(categories)
+    for tab, category in zip(tabs, categories):
+        with tab:
+            cat_df = results_df[results_df["Category"] == category][show_cols].reset_index(drop=True)
+            if cat_df.empty:
+                st.info(f"No fields extracted for **{category}**.")
+                continue
+            styled = _apply_confidence_style(cat_df)
+            st.dataframe(styled, use_container_width=True, hide_index=True, column_config=col_config)
+            st.caption(f"{len(cat_df)} field{'s' if len(cat_df) != 1 else ''} in this category")
+
+
 def display_results():
     """Display extraction results in organized format with enhanced UI."""
 
@@ -1006,60 +1074,9 @@ def display_results():
         )
         st.divider()
 
-    # Display all results table with clean, professional styling
-    # Only keep required columns and rename for display
-    display_df = results_df[["Code", "Key Measure", "Value", "Unit", "Confidence Level", "AI Reasoning / Source"]].copy()
-    display_df = display_df.rename(columns={
-        "Key Measure": "Measure Name",
-        "Confidence Level": "Confidence",
-        "AI Reasoning / Source": "Reasoning/Source"
-    })
-
-    st.markdown("### 📋 All Extracted Data")
-    # Table headers with custom sizing
-    header_cols = st.columns([1,2,1,1,1,3,1])
-    headers = ["Code", "Measure Name", "Value", "Unit", "Confidence", "Reasoning/Source", "Action"]
-    for hc, h in zip(header_cols, headers):
-        hc.markdown(f"**{h}**")
-
-    # Render each row manually to include badges, formatting, and feedback textarea
-    for idx, row in display_df.iterrows():
-        cols = st.columns([1,2,1,1,1,3,1])
-        cols[0].write(row["Code"])
-        cols[1].write(row["Measure Name"])
-        # value with N/A fallback and centered bold
-        val = row.get("Value", "")
-        if not val or val == "—":
-            val_html = "<span style='color:#888;'>N/A</span>"
-        else:
-            val_html = f"<div style='text-align:center;font-weight:bold;'>{val}</div>"
-        cols[2].markdown(val_html, unsafe_allow_html=True)
-        # unit centered bold
-        unit = row.get("Unit", "")
-        unit_html = f"<div style='text-align:center;font-weight:bold;'>{unit or ''}</div>"
-        cols[3].markdown(unit_html, unsafe_allow_html=True)
-        # confidence badge
-        try:
-            conf_val = int(str(row["Confidence"]).rstrip("%"))
-        except Exception:
-            conf_val = 0
-        badge_color = "green" if conf_val > 90 else "orange" if conf_val >= 70 else "red"
-        cols[4].markdown(
-            f"<span style='background-color:{badge_color}; color:white; padding:2px 6px; border-radius:4px;'>{conf_val}%</span>",
-            unsafe_allow_html=True
-        )
-        # reasoning with wrap
-        reasoning = row.get("Reasoning/Source", "")
-        cols[5].markdown(f"<div style='white-space:normal; word-wrap:break-word;'>{reasoning}</div>", unsafe_allow_html=True)
-        # action column: refine button and optional checkmark
-        status_val = results_df.loc[idx, "Validation Status"] if idx in results_df.index else ""
-        if isinstance(status_val, str) and status_val.lower() == "verified":
-            cols[6].write("✅")
-        if cols[6].button("Refine", key=f"refine_btn_{idx}"):
-            st.session_state.feedback_idx = idx
-        # show textarea if this row is selected
-        if st.session_state.feedback_idx == idx:
-            cols[6].text_area("Feedback", key=f"feedback_{idx}", placeholder="Enter your comments here...")
+    # ── Smart DataGrid: tabs by category + confidence color-coding ──────────
+    st.markdown("### 📋 All Extracted Data — by Category")
+    display_categorized_dataframe(results_df)
 
     st.divider()
 

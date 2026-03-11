@@ -299,9 +299,11 @@ def format_extraction_results(results: dict) -> pd.DataFrame:
     print(f"Created {len(rows)} rows")
     df = pd.DataFrame(rows)
 
-    # Ensure Value column is always string to prevent PyArrow serialization errors
-    if not df.empty and "Value" in df.columns:
-        df["Value"] = df["Value"].astype(str)
+    # Cast mixed-type columns to str to prevent PyArrow serialization errors
+    # (Gemini can return numeric or string values; Arrow infers the wrong dtype)
+    for col in ("Value", "Unit", "Confidence Level", "Category", "Page Reference"):
+        if col in df.columns:
+            df[col] = df[col].astype(str)
 
     # Sort by category, then by confidence level (descending)
     if not df.empty and "_confidence_numeric" in df.columns:
@@ -639,9 +641,14 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
         st.error(f"⚠️ Configuration Error: {str(e)}")
         st.info("Please ensure GEMINI_API_KEY is set in Streamlit secrets or your .env file")
     except Exception as e:
-        add_log_entry(f"Error: {str(e)}")
-        st.error(f"❌ Error during extraction: {str(e)}")
-        st.exception(e)
+        error_msg = str(e)
+        add_log_entry(f"Error: {error_msg}")
+        if "Daily API quota exhausted" in error_msg or "PerDay" in error_msg or "429" in error_msg:
+            st.error("⚠️ Google Gemini API quota exceeded (free tier: 20 requests/day). Please wait until tomorrow or upgrade your API plan.")
+            st.info("Your PDF was processed successfully — only the AI extraction step was blocked by the quota limit.")
+        else:
+            st.error(f"❌ Error during extraction: {error_msg}")
+            st.exception(e)
 
 
 def refine_field(field_code: str, field_row: pd.Series, user_feedback: str, results_df: pd.DataFrame):

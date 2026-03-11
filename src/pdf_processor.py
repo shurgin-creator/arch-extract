@@ -1,13 +1,18 @@
 """
 PDF processing utilities for converting pages to high-resolution images
 and extracting embedded text/tables via PyMuPDF (hybrid extraction).
+
+Lazy page iteration is the primary extraction path: pages are converted and
+yielded one at a time to avoid loading the full document into memory.
 """
 
+import gc
+import io
 import os
 import sys
 from pdf2image import convert_from_bytes
 from PIL import Image
-from typing import List, Dict, Tuple
+from typing import Generator, List, Tuple
 import fitz  # PyMuPDF
 
 
@@ -31,9 +36,78 @@ class PDFProcessor:
         else:
             self.poppler_path = None
 
+    # ------------------------------------------------------------------
+    # Lazy extraction (primary path — avoids OOM on large PDFs)
+    # ------------------------------------------------------------------
+
+    def get_page_count(self, pdf_bytes: bytes) -> int:
+        """
+        Return total page count without rendering any images.
+
+        Args:
+            pdf_bytes: PDF file as bytes
+
+        Returns:
+            Number of pages in the PDF
+        """
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        count = len(doc)
+        doc.close()
+        return count
+
+    def iter_pages(self, pdf_bytes: bytes) -> Generator[Tuple[Image.Image, str], None, None]:
+        """
+        Lazily yield (PIL.Image, page_text) for each page, one at a time.
+
+        Keeps the fitz document open across all pages for efficient text
+        extraction while converting images one page at a time via pdf2image.
+        After yielding, drops local references and calls gc.collect() so the
+        consumer's deletion triggers prompt memory release.
+
+        Args:
+            pdf_bytes: PDF file as bytes
+
+        Yields:
+            Tuple of (PIL Image for page, extracted text string for page)
+        """
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        try:
+            for page_index in range(len(doc)):
+                page_num = page_index + 1
+
+                # Convert this single page to an image (first_page/last_page avoids
+                # loading the entire PDF into Poppler memory at once)
+                page_images = convert_from_bytes(
+                    pdf_bytes,
+                    dpi=self.dpi,
+                    fmt=self.fmt,
+                    poppler_path=self.poppler_path,
+                    first_page=page_num,
+                    last_page=page_num,
+                )
+                image = page_images[0]
+                del page_images  # Free the list wrapper immediately
+
+                # Extract text for this page using the open fitz doc
+                fitz_page = doc[page_index]
+                page_text = self._extract_page_text_from_fitz_page(fitz_page)
+
+                yield image, page_text
+
+                # Drop generator-side references; consumer already del'd its copy,
+                # so after gc.collect() the PIL Image object is freed.
+                del image, page_text
+                gc.collect()
+        finally:
+            doc.close()
+
+    # ------------------------------------------------------------------
+    # Bulk extraction (kept for backward compatibility / refine path)
+    # ------------------------------------------------------------------
+
     def convert_pdf_bytes(self, pdf_bytes: bytes) -> List[Image.Image]:
         """
-        Convert PDF from bytes to images.
+        Convert PDF from bytes to images (all pages at once).
 
         Args:
             pdf_bytes: PDF file as bytes
@@ -54,8 +128,8 @@ class PDFProcessor:
 
     def extract_text_per_page(self, pdf_bytes: bytes) -> List[str]:
         """
-        Extract embedded text and table content from each PDF page using PyMuPDF.
-        Returns one text string per page with all machine-readable text preserved.
+        Extract embedded text from each PDF page using PyMuPDF.
+        Returns one text string per page.
 
         Args:
             pdf_bytes: PDF file as bytes
@@ -64,49 +138,23 @@ class PDFProcessor:
             List of text strings, one per page (empty string if no text on page)
         """
         page_texts = []
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         try:
-            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             for page_index in range(len(doc)):
-                page = doc[page_index]
-
-                # Extract plain text blocks with positional awareness
-                text_blocks = page.get_text("blocks")  # list of (x0, y0, x1, y1, text, block_no, block_type)
-                page_width = page.rect.width
-                page_height = page.rect.height
-
-                # Sort blocks top-to-bottom, left-to-right (natural reading order)
-                text_blocks_sorted = sorted(text_blocks, key=lambda b: (round(b[1] / 50), b[0]))
-
-                lines = []
-                for block in text_blocks_sorted:
-                    if block[6] == 0:  # block_type 0 = text (1 = image)
-                        raw = block[4].strip()
-                        if raw:
-                            lines.append(raw)
-
-                # Also extract any table-like structures using dict mode
-                table_text = self._extract_tables(page)
-                if table_text:
-                    lines.append("\n[TABLES DETECTED]\n" + table_text)
-
-                raw_text = "\n".join(lines)
-                # Aggressively truncate to prevent token limit errors on dense CAD PDFs
-                if len(raw_text) > 4000:
-                    raw_text = raw_text[:4000] + "\n[TRUNCATED - text exceeded 4000 char limit]"
-                page_texts.append(raw_text)
-
-            doc.close()
+                page_texts.append(
+                    self._extract_page_text_from_fitz_page(doc[page_index])
+                )
         except Exception as e:
             print(f"PyMuPDF text extraction warning: {e}")
-            # Graceful fallback: return empty strings so extraction still proceeds
             page_texts = [""] * len(page_texts) if page_texts else []
-
+        finally:
+            doc.close()
         return page_texts
 
     def convert_pdf_bytes_with_text(self, pdf_bytes: bytes) -> Tuple[List[Image.Image], List[str]]:
         """
         Combined hybrid extraction: converts PDF to images AND extracts embedded text.
-        Both operations run on the same bytes buffer — no double file I/O.
+        NOTE: Loads all pages into memory — use iter_pages() for large PDFs.
 
         Args:
             pdf_bytes: PDF file as bytes
@@ -117,17 +165,54 @@ class PDFProcessor:
         images = self.convert_pdf_bytes(pdf_bytes)
         page_texts = self.extract_text_per_page(pdf_bytes)
 
-        # Pad page_texts if PyMuPDF found fewer pages than pdf2image (edge case)
         while len(page_texts) < len(images):
             page_texts.append("")
 
         print(f"Hybrid extraction: {len(images)} pages, {sum(len(t) for t in page_texts)} total text chars extracted")
         return images, page_texts
 
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _extract_page_text_from_fitz_page(self, page) -> str:
+        """
+        Extract and process text from a single fitz.Page object.
+        Truncates to 4000 chars to prevent token overflows.
+
+        Args:
+            page: fitz.Page object
+
+        Returns:
+            Extracted text string (max 4000 chars)
+        """
+        try:
+            text_blocks = page.get_text("blocks")
+            # Sort top-to-bottom, left-to-right (natural reading order)
+            text_blocks_sorted = sorted(text_blocks, key=lambda b: (round(b[1] / 50), b[0]))
+
+            lines = []
+            for block in text_blocks_sorted:
+                if block[6] == 0:  # block_type 0 = text (1 = image)
+                    raw = block[4].strip()
+                    if raw:
+                        lines.append(raw)
+
+            table_text = self._extract_tables(page)
+            if table_text:
+                lines.append("\n[TABLES DETECTED]\n" + table_text)
+
+            raw_text = "\n".join(lines)
+            # Aggressively truncate to prevent token limit errors on dense CAD PDFs
+            if len(raw_text) > 4000:
+                raw_text = raw_text[:4000] + "\n[TRUNCATED - text exceeded 4000 char limit]"
+            return raw_text
+        except Exception:
+            return ""
+
     def _extract_tables(self, page) -> str:
         """
-        Attempt to extract table-like structures from a page using PyMuPDF's
-        text dict mode to reconstruct rows of aligned text spans.
+        Reconstruct table rows from multi-span lines using PyMuPDF dict mode.
 
         Args:
             page: fitz.Page object
@@ -161,7 +246,6 @@ class PDFProcessor:
         Returns:
             Image as bytes
         """
-        import io
         buffer = io.BytesIO()
         image.save(buffer, format=self.fmt.upper())
         return buffer.getvalue()

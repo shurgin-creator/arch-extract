@@ -9,7 +9,6 @@ import pandas as pd
 import json
 from io import BytesIO
 from datetime import datetime
-import time
 import traceback
 from dotenv import load_dotenv
 
@@ -137,7 +136,7 @@ st.markdown("""
         cursor: pointer;
         font-size: 0.9rem;
     }
-    }
+    
     
     /* Tab styling */
     .stTabs [data-baseweb="tab-list"] {
@@ -299,16 +298,10 @@ def format_extraction_results(results: dict) -> pd.DataFrame:
     print(f"Created {len(rows)} rows")
     df = pd.DataFrame(rows)
 
-    # Cast mixed-type columns to str to prevent PyArrow serialization errors
-    # (Gemini can return numeric or string values; Arrow infers the wrong dtype)
-    for col in ("Value", "Unit", "Confidence Level", "Category", "Page Reference"):
-        if col in df.columns:
-            df[col] = df[col].astype(str)
-
     # Sort by category, then by confidence level (descending)
     if not df.empty and "_confidence_numeric" in df.columns:
         df = df.sort_values(by=["Category", "_confidence_numeric"], ascending=[True, False])
-        df = df.drop(columns=["_confidence_numeric", "_validation_status", "_field_code"], errors="ignore")
+        df = df.drop("_confidence_numeric", axis=1)
 
     print(f"Final DataFrame shape: {df.shape}")
     print(f"Final DataFrame columns: {list(df.columns)}")
@@ -406,14 +399,28 @@ def main():
     """Main Streamlit application - Professional Project Management System."""
     initialize_session_state()
 
-    # The 'Magic' Display at the VERY top
-    if 'data' in st.session_state and isinstance(st.session_state['data'], pd.DataFrame) and not st.session_state['data'].empty:
-        st.success('Extraction Complete!')
-        st.dataframe(st.session_state['data'])
-
-    # Handle loading a project from history - TEMPORARILY DISABLED
-    # if st.session_state.load_project and st.session_state.selected_project_id:
-    #     ...
+    # Handle loading a project from history
+    if st.session_state.load_project and st.session_state.selected_project_id:
+        db = get_db()
+        project = db.get_project(st.session_state.selected_project_id)
+        if project:
+            # Complete load with JSON safety
+            data = project['analysis_json']
+            st.session_state.extraction_results = data if isinstance(data, (dict, list)) else json.loads(data)
+            
+            # Persistence
+            st.session_state.current_project_id = project['id']
+            st.session_state.current_project_name = project['project_name']
+            st.session_state.pdf_processed = True
+            st.session_state.load_project = False
+            st.session_state.selected_project_id = None
+            st.success(f"Loaded project: {project['project_name']}")
+            # UI Trigger
+            st.rerun()
+        else:
+            st.error("Project not found")
+            st.session_state.load_project = False
+            st.session_state.selected_project_id = None
 
     try:
         # Header
@@ -423,9 +430,9 @@ def main():
 
         # Sidebar - Project History & Configuration
         with st.sidebar:
-            # Project History Section - TEMPORARILY DISABLED
-            # show_project_history()
-            # st.divider()
+            # Project History Section
+            show_project_history()
+            st.divider()
 
             st.header("⚙️ Configuration")
 
@@ -500,14 +507,15 @@ def main():
                     except Exception as e:
                         print(f"ERROR in button click: {str(e)}")
                         st.error(f"❌ Processing failed: {str(e)}")
+                        import traceback
                         traceback.print_exc()
             else:
                 st.info("Please upload a PDF file to begin extraction")
 
         st.divider()
 
-        # Display results if available
         if st.session_state.extraction_results:
+            st.write(f"Debug: Results found: {len(st.session_state.extraction_results) if st.session_state.extraction_results else 0}")
             display_results()
 
     except Exception as e:
@@ -539,10 +547,8 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
 
         pdf_processor = PDFProcessor(dpi=dpi, fmt="png")
         pdf_bytes = uploaded_file.read()
-        # Hybrid extraction: get images AND embedded text in one pass
-        images, page_texts = pdf_processor.convert_pdf_bytes_with_text(pdf_bytes)
+        images = pdf_processor.convert_pdf_bytes(pdf_bytes)
         st.session_state.extracted_images = images
-        add_log_entry(f"Hybrid text extraction: {sum(len(t) for t in page_texts)} chars from {len(images)} pages")
 
         add_log_entry(f"PDF converted to {len(images)} page(s)")
         status_text.text(f"✓ PDF converted to {len(images)} page(s)")
@@ -587,23 +593,12 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
             add_log_entry(f"Completed page {page_num}/{total_pages}")
 
         # Use paged extraction method (one page at a time with delays)
-        try:
-            results = extractor.extract_data_from_multiple_pages(images, fields_to_extract, update_progress, page_texts)
-        except Exception as api_err:
-            progress_placeholder.empty()
-            status_placeholder.empty()
-            add_log_entry(f"API extraction failed: {str(api_err)}")
-            st.error(f"❌ Gemini API extraction failed: {str(api_err)}")
-            st.info("Check the terminal/logs for the full exception traceback.")
-            return
+        results = extractor.extract_data_from_multiple_pages(images, fields_to_extract, update_progress)
         add_log_entry("Paged data extraction completed successfully")
 
         # Clear progress indicators
         progress_placeholder.empty()
         status_placeholder.empty()
-
-        # Global Variable: save to simple st.session_state['data']
-        st.session_state['data'] = format_extraction_results(results)
 
         # Debug: Print results to terminal
         print("=== AI EXTRACTION RESULTS ===")
@@ -613,6 +608,11 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
 
         st.session_state.extraction_results = results
         st.session_state.pdf_processed = True
+
+        progress_bar.progress(85)
+
+        # Auto-refresh immediately after setting state
+        # st.rerun()
 
         # Step 5: Save to database
         add_log_entry("Saving project to database...")
@@ -630,10 +630,16 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
 
         progress_bar.progress(100)
         status_text.text("✓ Data extraction & saving complete!")
+
+        # Clear progress indicators after a moment
+        import time
+        time.sleep(1)
         progress_bar.empty()
         status_text.empty()
 
-        # Refresh UI to display results
+        st.success("✅ Data extraction completed successfully!")
+
+        # Force UI refresh to display results
         st.rerun()
 
     except ValueError as e:
@@ -641,14 +647,9 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
         st.error(f"⚠️ Configuration Error: {str(e)}")
         st.info("Please ensure GEMINI_API_KEY is set in Streamlit secrets or your .env file")
     except Exception as e:
-        error_msg = str(e)
-        add_log_entry(f"Error: {error_msg}")
-        if "Daily API quota exhausted" in error_msg or "PerDay" in error_msg or "429" in error_msg:
-            st.error("⚠️ Google Gemini API quota exceeded (free tier: 20 requests/day). Please wait until tomorrow or upgrade your API plan.")
-            st.info("Your PDF was processed successfully — only the AI extraction step was blocked by the quota limit.")
-        else:
-            st.error(f"❌ Error during extraction: {error_msg}")
-            st.exception(e)
+        add_log_entry(f"Error: {str(e)}")
+        st.error(f"❌ Error during extraction: {str(e)}")
+        st.exception(e)
 
 
 def refine_field(field_code: str, field_row: pd.Series, user_feedback: str, results_df: pd.DataFrame):

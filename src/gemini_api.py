@@ -2,11 +2,12 @@
 Gemini API integration for architectural data extraction.
 """
 
+import gc
 import os
 import json
 import re
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from PIL import Image
 import google.genai as genai
 
@@ -129,66 +130,102 @@ class GeminiDataExtractor:
         raise RuntimeError(f"Failed to process page {page_num} after {max_retries} attempts")
 
     def extract_data_from_multiple_pages(
-        self, images: List[Image.Image], extraction_fields: List[str], progress_callback=None,
-        page_texts: List[str] = None
-    ) -> Dict[str, Dict[str, any]]:
+        self,
+        page_iterator,
+        extraction_fields: List[str],
+        progress_callback=None,
+        total_pages: int = 0,
+    ) -> Tuple[Dict[str, Dict[str, any]], Optional[str]]:
         """
-        Extract data from ALL PDF pages and aggregate results.
-        Processes every single page of the PDF with rate limiting to avoid API quota issues.
-        
+        Extract data lazily, one page at a time, to minimise peak memory usage.
+
+        Accepts an iterable of (PIL.Image, page_text) tuples — typically from
+        PDFProcessor.iter_pages(). After each page is processed the image
+        reference is explicitly deleted and gc.collect() is called so memory
+        is freed before the next page is loaded.
+
+        If the Google API daily quota is exhausted mid-run, processing stops
+        immediately and partial results gathered so far are returned rather
+        than crashing the application.
+
         Args:
-            images: List of PIL Images
-            extraction_fields: List of field names to extract
-            progress_callback: Optional callback function to update progress (page_num, total_pages)
-            
+            page_iterator: Iterable of (PIL.Image, page_text_str) tuples
+            extraction_fields: List of field codes to extract
+            progress_callback: Optional callback(page_num, total_pages)
+            total_pages: Total page count for progress / rate-limit logic
+
         Returns:
-            Aggregated extraction results
+            Tuple of (aggregated_results_dict, quota_warning_str_or_None).
+            quota_warning_str is None when no quota issues occurred.
         """
-        total_pages = len(images)
-        print(f"Processing ALL {total_pages} pages of the PDF with rate limiting...")
-        
+        print(f"Processing {total_pages} pages lazily (one at a time) with rate limiting...")
+
         all_results = []
         failed_pages = []
+        quota_warning = None
+        page_num = 0
 
-        for page_num, image in enumerate(images, 1):
+        for image, page_text in page_iterator:
+            page_num += 1
             try:
                 print(f"Processing page {page_num}/{total_pages}...")
-                text_for_page = (page_texts[page_num - 1] if page_texts and page_num - 1 < len(page_texts) else "")
-                result = self.extract_data_from_image(image, extraction_fields, page_num, text_for_page)
+                result = self.extract_data_from_image(image, extraction_fields, page_num, page_text)
                 result["page_number"] = page_num
                 all_results.append(result)
 
-                # Update progress if callback provided
                 if progress_callback:
                     progress_callback(page_num, total_pages)
 
-                # Rate limiting: wait 15 seconds between pages (except for the last page)
-                if page_num < total_pages:
+                # Rate limiting: 15 s between pages except after the last page
+                if total_pages > 0 and page_num < total_pages:
                     print(f"Page {page_num}/{total_pages} - Success - Waiting 15s...")
                     time.sleep(15)
 
-            except Exception as e:
+            except RuntimeError as e:
                 error_msg = str(e)
                 print(f"Page {page_num} FAILED: {error_msg}")
-                failed_pages.append((page_num, error_msg))
-                # Still apply rate-limit delay on failure to avoid quota hammering
-                if page_num < total_pages:
-                    time.sleep(15)
-                continue
 
-        # Surface failures clearly instead of returning silent empty results
+                if "Daily API quota exhausted" in error_msg:
+                    # Daily quota cannot be recovered by retrying — stop now and
+                    # return whatever partial data was collected before the limit.
+                    quota_warning = (
+                        f"Google API daily quota exhausted after page {page_num - 1}. "
+                        f"Partial results from {len(all_results)} successfully extracted "
+                        "page(s) are shown. Please wait until tomorrow or upgrade your "
+                        "Gemini API plan."
+                    )
+                    print(f"Daily quota hit — stopping with {len(all_results)} partial result(s).")
+                    break  # exit for-loop; finally still runs for this iteration
+
+                failed_pages.append((page_num, error_msg))
+                # Still apply rate-limit delay on non-quota failures
+                if total_pages > 0 and page_num < total_pages:
+                    time.sleep(15)
+
+            finally:
+                # Explicit memory release after each page regardless of outcome
+                del image
+                gc.collect()
+
+        # Close the generator explicitly so fitz doc is released promptly
+        if hasattr(page_iterator, "close"):
+            page_iterator.close()
+
+        # If nothing succeeded at all, raise so the UI shows a clear error
         if not all_results:
+            if quota_warning:
+                raise RuntimeError(quota_warning)
             first_error = failed_pages[0][1] if failed_pages else "Unknown error"
             raise RuntimeError(
                 f"All {total_pages} pages failed to extract. First error: {first_error}"
             )
+
         if failed_pages:
             print(f"Warning: {len(failed_pages)}/{total_pages} pages failed: "
                   f"{[p for p, _ in failed_pages]}")
-        
-        # Aggregate results (take highest confidence values)
+
         aggregated = self._aggregate_results(all_results)
-        return aggregated
+        return aggregated, quota_warning
 
     def refine_field_value(
         self, images: List[Image.Image], field_code: str, original_value: str, 

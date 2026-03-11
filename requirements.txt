@@ -9,3 +9,5 @@ pandas
 openpyxl
 # Hybrid PDF text extraction (Phase 1 accuracy boost)
 PyMuPDF
+# Cloud persistence and auth (Phase 2/3)
+supabase

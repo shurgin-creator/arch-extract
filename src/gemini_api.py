@@ -135,6 +135,7 @@ class GeminiDataExtractor:
         extraction_fields: List[str],
         progress_callback=None,
         total_pages: int = 0,
+        checkpoint_callback=None,
     ) -> Tuple[Dict[str, Dict[str, any]], Optional[str]]:
         """
         Extract data lazily, one page at a time, to minimise peak memory usage.
@@ -157,6 +158,11 @@ class GeminiDataExtractor:
         Returns:
             Tuple of (aggregated_results_dict, quota_warning_str_or_None).
             quota_warning_str is None when no quota issues occurred.
+
+        Args (additional):
+            checkpoint_callback: Optional callable(page_num, partial_aggregated_results).
+                Called after every successful page so callers can persist
+                incremental data (e.g. write to Supabase) before the next page.
         """
         print(f"Processing {total_pages} pages lazily (one at a time) with rate limiting...")
 
@@ -175,6 +181,14 @@ class GeminiDataExtractor:
 
                 if progress_callback:
                     progress_callback(page_num, total_pages)
+
+                # Incremental checkpoint: persist partial results after every page
+                if checkpoint_callback and all_results:
+                    try:
+                        partial = self._aggregate_results(all_results)
+                        checkpoint_callback(page_num, partial)
+                    except Exception as ckpt_err:
+                        print(f"Checkpoint callback warning (non-fatal): {ckpt_err}")
 
                 # Rate limiting: 15 s between pages except after the last page
                 if total_pages > 0 and page_num < total_pages:

@@ -19,7 +19,7 @@ load_dotenv()
 
 from src.pdf_processor import PDFProcessor  # noqa: E402
 from src.gemini_api import GeminiDataExtractor  # noqa: E402
-from src.database import get_db  # noqa: E402
+from src.supabase_client import get_supabase  # noqa: E402
 from config.extraction_categories import EXTRACTION_CATEGORIES  # noqa: E402
 
 # Page configuration
@@ -221,11 +221,26 @@ def display_live_log():
 
 
 def show_project_history():
-    """Display project history in sidebar."""
+    """Display project history from Supabase in the sidebar."""
     st.markdown('<div class="sidebar-title">📁 Project History</div>', unsafe_allow_html=True)
 
-    db = get_db()
-    projects = db.get_all_projects()
+    user = st.session_state.get("user")
+    if not user:
+        return
+
+    try:
+        supabase = get_supabase()
+        resp = (
+            supabase.table("projects")
+            .select("id, project_name, filename, total_pages, updated_at, status")
+            .eq("user_id", user.id)
+            .order("updated_at", desc=True)
+            .execute()
+        )
+        projects = resp.data or []
+    except Exception as e:
+        st.warning(f"Could not load project history: {e}")
+        return
 
     if not projects:
         st.info("No projects saved yet. Upload a PDF to create one.")
@@ -233,25 +248,26 @@ def show_project_history():
 
     for project in projects:
         col1, col2 = st.columns([4, 1])
+        status_icon = "✅" if project.get("status") == "completed" else "⏳"
+        updated = (project.get("updated_at") or "")[:10]
 
         with col1:
-            # Create a clickable project item
             if st.button(
-                f"📄 {project['project_name']}\n{project['updated_at'][:10]} | {project['total_pages']} pages",
+                f"{status_icon} {project['project_name']}\n{updated} | {project.get('total_pages', '?')} pages",
                 key=f"load_{project['id']}",
-                use_container_width=True
+                use_container_width=True,
             ):
                 st.session_state.selected_project_id = project["id"]
                 st.session_state.load_project = True
 
         with col2:
-            # Delete button
             if st.button("🗑️", key=f"delete_{project['id']}", help="Delete this project"):
-                if db.delete_project(project["id"]):
+                try:
+                    supabase.table("projects").delete().eq("id", project["id"]).execute()
                     st.success(f"Deleted {project['project_name']}")
                     st.rerun()
-                else:
-                    st.error("Failed to delete project")
+                except Exception as e:
+                    st.error(f"Failed to delete: {e}")
 
 
 def display_confidence_badge(confidence: int) -> str:
@@ -376,8 +392,60 @@ def get_low_confidence_items(results_df: pd.DataFrame) -> pd.DataFrame:
     return results_df[confidence_nums < 70]
 
 
+def show_auth_page():
+    """Full-page login/signup UI shown when the user is not authenticated."""
+    st.markdown("<div class='main-header'>📐 Architectural PDF Data Extractor</div>", unsafe_allow_html=True)
+    st.markdown("Please log in or create an account to continue.")
+    st.divider()
+
+    try:
+        supabase = get_supabase()
+    except ValueError as e:
+        st.error(f"⚠️ Supabase not configured: {e}")
+        st.info("Add SUPABASE_URL and SUPABASE_KEY to your Streamlit secrets.")
+        return
+
+    tab_login, tab_signup = st.tabs(["Log In", "Sign Up"])
+
+    with tab_login:
+        email = st.text_input("Email", key="login_email")
+        password = st.text_input("Password", type="password", key="login_password")
+        if st.button("Log In", type="primary", use_container_width=True, key="login_btn"):
+            if not email or not password:
+                st.error("Please enter both email and password.")
+            else:
+                try:
+                    response = supabase.auth.sign_in_with_password({"email": email, "password": password})
+                    st.session_state.user = response.user
+                    st.session_state.supabase_access_token = response.session.access_token
+                    st.session_state.supabase_refresh_token = response.session.refresh_token
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Login failed: {str(e)}")
+
+    with tab_signup:
+        email_s = st.text_input("Email", key="signup_email")
+        password_s = st.text_input("Password (min 6 chars)", type="password", key="signup_password")
+        if st.button("Create Account", use_container_width=True, key="signup_btn"):
+            if not email_s or not password_s:
+                st.error("Please fill in all fields.")
+            else:
+                try:
+                    supabase.auth.sign_up({"email": email_s, "password": password_s})
+                    st.success("✅ Account created! Check your email to confirm, then log in.")
+                except Exception as e:
+                    st.error(f"Sign-up failed: {str(e)}")
+
+
 def initialize_session_state():
     """Initialize session state variables."""
+    # Auth
+    if 'user' not in st.session_state:
+        st.session_state.user = None
+    if 'supabase_access_token' not in st.session_state:
+        st.session_state.supabase_access_token = None
+    if 'supabase_refresh_token' not in st.session_state:
+        st.session_state.supabase_refresh_token = None
     if 'extraction_results' not in st.session_state:
         st.session_state.extraction_results = None
     if 'pdf_processed' not in st.session_state:
@@ -413,26 +481,35 @@ def main():
     """Main Streamlit application - Professional Project Management System."""
     initialize_session_state()
 
-    # Handle loading a project from history
+    # ── Auth gate ──────────────────────────────────────────────────────────
+    if not st.session_state.get("user"):
+        show_auth_page()
+        return
+
+    # ── Load project from history ──────────────────────────────────────────
     if st.session_state.load_project and st.session_state.selected_project_id:
-        db = get_db()
-        project = db.get_project(st.session_state.selected_project_id)
-        if project:
-            # Complete load with JSON safety
-            data = project['analysis_json']
-            st.session_state.extraction_results = data if isinstance(data, (dict, list)) else json.loads(data)
-            
-            # Persistence
-            st.session_state.current_project_id = project['id']
-            st.session_state.current_project_name = project['project_name']
-            st.session_state.pdf_processed = True
-            st.session_state.load_project = False
-            st.session_state.selected_project_id = None
-            st.success(f"Loaded project: {project['project_name']}")
-            # UI Trigger
-            st.rerun()
-        else:
-            st.error("Project not found")
+        try:
+            supabase = get_supabase()
+            resp = (
+                supabase.table("projects")
+                .select("*")
+                .eq("id", st.session_state.selected_project_id)
+                .single()
+                .execute()
+            )
+            project = resp.data
+            if project:
+                # analysis_json is JSONB — already a dict from Supabase
+                st.session_state.extraction_results = project["analysis_json"]
+                st.session_state.current_project_id = project["id"]
+                st.session_state.current_project_name = project["project_name"]
+                st.session_state.pdf_processed = True
+                st.session_state.load_project = False
+                st.session_state.selected_project_id = None
+                st.success(f"Loaded project: {project['project_name']}")
+                st.rerun()
+        except Exception as e:
+            st.error(f"Failed to load project: {e}")
             st.session_state.load_project = False
             st.session_state.selected_project_id = None
 
@@ -442,9 +519,25 @@ def main():
         st.markdown("Professional Data Extraction System with Persistent Storage & Quality Control")
         st.divider()
 
-        # Sidebar - Project History & Configuration
+        # Sidebar - Auth status + Project History + Configuration
         with st.sidebar:
-            # Project History Section
+            # User info & logout
+            user = st.session_state.user
+            st.markdown(f"👤 **{user.email}**")
+            if st.button("Log Out", key="logout_btn"):
+                try:
+                    supabase = get_supabase()
+                    supabase.auth.sign_out()
+                except Exception:
+                    pass
+                for key in ["user", "supabase_client", "supabase_access_token",
+                            "supabase_refresh_token", "extraction_results",
+                            "current_project_id", "current_project_name"]:
+                    st.session_state.pop(key, None)
+                st.rerun()
+            st.divider()
+
+            # Project History (Supabase-backed)
             show_project_history()
             st.divider()
 
@@ -572,6 +665,42 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
         status_text.text(f"✓ PDF opened: {total_pages_count} page(s) — lazy mode active")
         progress_bar.progress(40)
 
+        # ── Cloud storage upload ──────────────────────────────────────────
+        user = st.session_state.get("user")
+        supabase = get_supabase()
+        project_name = uploaded_file.name.rsplit(".", 1)[0]
+
+        if user:
+            try:
+                storage_path = f"{user.id}/{uploaded_file.name}"
+                supabase.storage.from_("pdfs").upload(
+                    path=storage_path,
+                    file=pdf_bytes,
+                    file_options={"content-type": "application/pdf", "upsert": "true"},
+                )
+                add_log_entry(f"PDF uploaded to cloud storage: pdfs/{storage_path}")
+            except Exception as e:
+                add_log_entry(f"Cloud storage upload warning (non-fatal): {e}")
+
+        # ── Insert project row with status='processing' ───────────────────
+        project_id = None
+        if user:
+            try:
+                resp = supabase.table("projects").insert({
+                    "project_name": project_name,
+                    "filename": uploaded_file.name,
+                    "user_id": user.id,
+                    "total_pages": total_pages_count,
+                    "analysis_json": {},
+                    "status": "processing",
+                }).execute()
+                project_id = resp.data[0]["id"]
+                st.session_state.current_project_id = project_id
+                st.session_state.current_project_name = project_name
+                add_log_entry(f"Project '{project_name}' created in Supabase (ID: {project_id})")
+            except Exception as e:
+                add_log_entry(f"Supabase project creation warning (non-fatal): {e}")
+
         # Step 2: Initialize Gemini API
         add_log_entry("Connecting to Gemini API...")
         status_text.text("🤖 Connecting to Gemini API...")
@@ -610,12 +739,28 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
             status_placeholder.text("Rate-limited API calls with 15s delays between pages...")
             add_log_entry(f"Completed page {page_num}/{total_pages}")
 
+        # ── Incremental checkpoint callback ───────────────────────────────
+        # Persists partial results to Supabase after every successful page.
+        # If a 429 quota error fires mid-run, all completed pages are already
+        # safely stored in the cloud.
+        def checkpoint_to_supabase(page_num: int, partial_results: dict):
+            if not project_id:
+                return
+            try:
+                supabase.table("projects").update({
+                    "analysis_json": partial_results,
+                }).eq("id", project_id).execute()
+                add_log_entry(f"Checkpoint saved to Supabase after page {page_num}")
+            except Exception as ck_err:
+                print(f"Supabase checkpoint warning (non-fatal): {ck_err}")
+
         # Lazy extraction: iter_pages yields one (image, text) tuple at a time,
         # each freed from memory before the next page is loaded.
         page_iter = pdf_processor.iter_pages(pdf_bytes)
         try:
             results, quota_warning = extractor.extract_data_from_multiple_pages(
-                page_iter, fields_to_extract, update_progress, total_pages_count
+                page_iter, fields_to_extract, update_progress, total_pages_count,
+                checkpoint_callback=checkpoint_to_supabase,
             )
         except Exception as api_err:
             progress_placeholder.empty()
@@ -647,19 +792,17 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
         # Auto-refresh immediately after setting state
         # st.rerun()
 
-        # Step 5: Save to database
-        add_log_entry("Saving project to database...")
-        db = get_db()
-        project_name = uploaded_file.name.split(".")[0]  # Remove .pdf extension
-        project_id = db.save_project(
-            project_name=project_name,
-            filename=uploaded_file.name,
-            analysis_json=results,
-            total_pages=total_pages_count
-        )
-        st.session_state.current_project_id = project_id
-        st.session_state.current_project_name = project_name
-        add_log_entry(f"Project '{project_name}' saved (ID: {project_id})")
+        # Step 5: Mark project as completed in Supabase
+        add_log_entry("Finalising project in Supabase...")
+        if project_id:
+            try:
+                supabase.table("projects").update({
+                    "analysis_json": results,
+                    "status": "completed",
+                }).eq("id", project_id).execute()
+                add_log_entry(f"Project '{project_name}' marked completed in Supabase")
+            except Exception as e:
+                add_log_entry(f"Supabase finalisation warning (non-fatal): {e}")
 
         progress_bar.progress(100)
         status_text.text("✓ Data extraction & saving complete!")
@@ -733,17 +876,17 @@ def refine_field(field_code: str, field_row: pd.Series, user_feedback: str, resu
             if field_code in st.session_state.extraction_results:
                 st.session_state.extraction_results[field_code].update(refined_field)
 
-            # Save refinement to database
-            db = get_db()
-            db.add_field_refinement(
-                project_id=st.session_state.current_project_id,
-                field_code=field_code,
-                original_value=str(field_row["Value"]),
-                refined_value=str(refined_field.get("value", "")),
-                user_feedback=user_feedback
-            )
-
-            add_log_entry(f"Refinement saved to database for project {st.session_state.current_project_id}")
+            # Persist updated analysis_json back to Supabase
+            pid = st.session_state.current_project_id
+            if pid:
+                try:
+                    supabase = get_supabase()
+                    supabase.table("projects").update({
+                        "analysis_json": st.session_state.extraction_results,
+                    }).eq("id", pid).execute()
+                    add_log_entry(f"Refined analysis saved to Supabase (project {pid})")
+                except Exception as save_err:
+                    add_log_entry(f"Supabase refinement save warning (non-fatal): {save_err}")
 
             st.success(f"✅ Field {field_code} refined successfully!")
             st.markdown("**New Value:**")

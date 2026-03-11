@@ -89,7 +89,11 @@ class PDFProcessor:
                 if table_text:
                     lines.append("\n[TABLES DETECTED]\n" + table_text)
 
-                page_texts.append("\n".join(lines))
+                raw_text = "\n".join(lines)
+                # Aggressively truncate to prevent token limit errors on dense CAD PDFs
+                if len(raw_text) > 4000:
+                    raw_text = raw_text[:4000] + "\n[TRUNCATED - text exceeded 4000 char limit]"
+                page_texts.append(raw_text)
 
             doc.close()
         except Exception as e:

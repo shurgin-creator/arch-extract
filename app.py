@@ -581,7 +581,15 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
             add_log_entry(f"Completed page {page_num}/{total_pages}")
 
         # Use paged extraction method (one page at a time with delays)
-        results = extractor.extract_data_from_multiple_pages(images, fields_to_extract, update_progress, page_texts)
+        try:
+            results = extractor.extract_data_from_multiple_pages(images, fields_to_extract, update_progress, page_texts)
+        except Exception as api_err:
+            progress_placeholder.empty()
+            status_placeholder.empty()
+            add_log_entry(f"API extraction failed: {str(api_err)}")
+            st.error(f"❌ Gemini API extraction failed: {str(api_err)}")
+            st.info("Check the terminal/logs for the full exception traceback.")
+            return
         add_log_entry("Paged data extraction completed successfully")
 
         # Clear progress indicators

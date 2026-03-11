@@ -101,19 +101,22 @@ class GeminiDataExtractor:
 
             except Exception as e:
                 error_str = str(e)
-                
+                print(f"=== EXCEPTION on page {page_num} attempt {attempt + 1}/{max_retries} ===")
+                print(f"  Type : {type(e).__name__}")
+                print(f"  Error: {error_str}")
+                import traceback as _tb; _tb.print_exc()
+                print(f"=== END EXCEPTION ===")
+
                 # Check if it's a rate limit error (429)
                 if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
                     if attempt < max_retries - 1:
-                        # Don't wait here - exponential backoff is handled at the start of next attempt
-                        print(f"Rate limit hit for page {page_num} (attempt {attempt + 1}/{max_retries})")
+                        print(f"Rate limit hit for page {page_num} (attempt {attempt + 1}/{max_retries}), will retry...")
                         continue
                     else:
-                        print(f"Rate limit error persisted for page {page_num} after {max_retries} attempts. Skipping page.")
-                        raise RuntimeError(f"Rate limit error for page {page_num}: {error_str}")
+                        raise RuntimeError(f"Rate limit error for page {page_num} after {max_retries} attempts: {error_str}")
                 else:
-                    # Non-rate-limit error, don't retry
-                    raise RuntimeError(f"Error extracting data from image using Gemini: {error_str}")
+                    # Non-rate-limit error: raise immediately, no further retries
+                    raise RuntimeError(f"[{type(e).__name__}] Error on page {page_num}: {error_str}")
         
         # This should never be reached, but just in case
         raise RuntimeError(f"Failed to process page {page_num} after {max_retries} attempts")
@@ -138,7 +141,8 @@ class GeminiDataExtractor:
         print(f"Processing ALL {total_pages} pages of the PDF with rate limiting...")
         
         all_results = []
-        
+        failed_pages = []
+
         for page_num, image in enumerate(images, 1):
             try:
                 print(f"Processing page {page_num}/{total_pages}...")
@@ -146,19 +150,34 @@ class GeminiDataExtractor:
                 result = self.extract_data_from_image(image, extraction_fields, page_num, text_for_page)
                 result["page_number"] = page_num
                 all_results.append(result)
-                
+
                 # Update progress if callback provided
                 if progress_callback:
                     progress_callback(page_num, total_pages)
-                
+
                 # Rate limiting: wait 15 seconds between pages (except for the last page)
                 if page_num < total_pages:
                     print(f"Page {page_num}/{total_pages} - Success - Waiting 15s...")
                     time.sleep(15)
-                    
+
             except Exception as e:
-                print(f"Error processing page {page_num}: {str(e)}")
+                error_msg = str(e)
+                print(f"Page {page_num} FAILED: {error_msg}")
+                failed_pages.append((page_num, error_msg))
+                # Still apply rate-limit delay on failure to avoid quota hammering
+                if page_num < total_pages:
+                    time.sleep(15)
                 continue
+
+        # Surface failures clearly instead of returning silent empty results
+        if not all_results:
+            first_error = failed_pages[0][1] if failed_pages else "Unknown error"
+            raise RuntimeError(
+                f"All {total_pages} pages failed to extract. First error: {first_error}"
+            )
+        if failed_pages:
+            print(f"Warning: {len(failed_pages)}/{total_pages} pages failed: "
+                  f"{[p for p, _ in failed_pages]}")
         
         # Aggregate results (take highest confidence values)
         aggregated = self._aggregate_results(all_results)

@@ -109,6 +109,13 @@ class GeminiDataExtractor:
 
                 # Check if it's a rate limit error (429)
                 if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+                    # Daily quota exhaustion cannot be fixed by retrying — fail immediately
+                    if "PerDay" in error_str or "per_day" in error_str:
+                        raise RuntimeError(
+                            f"Daily API quota exhausted (free tier limit reached). "
+                            f"Please wait until tomorrow or upgrade your Gemini API plan. "
+                            f"Details: {error_str[:300]}"
+                        )
                     if attempt < max_retries - 1:
                         print(f"Rate limit hit for page {page_num} (attempt {attempt + 1}/{max_retries}), will retry...")
                         continue

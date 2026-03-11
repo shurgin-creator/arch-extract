@@ -299,6 +299,10 @@ def format_extraction_results(results: dict) -> pd.DataFrame:
     print(f"Created {len(rows)} rows")
     df = pd.DataFrame(rows)
 
+    # Ensure Value column is always string to prevent PyArrow serialization errors
+    if not df.empty and "Value" in df.columns:
+        df["Value"] = df["Value"].astype(str)
+
     # Sort by category, then by confidence level (descending)
     if not df.empty and "_confidence_numeric" in df.columns:
         df = df.sort_values(by=["Category", "_confidence_numeric"], ascending=[True, False])

@@ -402,32 +402,32 @@ def format_extraction_results(results: dict) -> pd.DataFrame:
 
 def create_excel_export(results_df: pd.DataFrame, raw_results: dict) -> BytesIO:
     """Create an Excel file with formatted results including professional accuracy data."""
-    with BytesIO() as output:
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Write summary sheet
-            summary_data = {
-                "Metric": ["Total Fields", "Fields Extracted", "Average Confidence", "High Confidence (>80%)", "Validation Issues", "Pages Processed"],
-                "Value": [
-                    len(results_df),
-                    len(results_df[results_df["Value"] != "—"]),
-                    f"{results_df['Confidence Level'].str.rstrip('%').astype(float).mean():.1f}%",
-                    len(results_df[results_df["Confidence Level"].str.rstrip('%').astype(float) > 80]),
-                    len(results_df[results_df["Validation Status"].isin(["calculated_conflict", "sanity_check_failed", "scale_uncertain"])]),
-                    st.session_state.get("total_pages", "N/A")
-                ]
-            }
-            summary_df = pd.DataFrame(summary_data)
-            summary_df.to_excel(writer, sheet_name="Summary", index=False)
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # Write summary sheet
+        summary_data = {
+            "Metric": ["Total Fields", "Fields Extracted", "Average Confidence", "High Confidence (>80%)", "Validation Issues", "Pages Processed"],
+            "Value": [
+                len(results_df),
+                len(results_df[results_df["Value"] != "—"]),
+                f"{results_df['Confidence Level'].str.rstrip('%').astype(float).mean():.1f}%",
+                len(results_df[results_df["Confidence Level"].str.rstrip('%').astype(float) > 80]),
+                len(results_df[results_df["Validation Status"].isin(["calculated_conflict", "sanity_check_failed", "scale_uncertain"])]),
+                st.session_state.get("total_pages", "N/A")
+            ]
+        }
+        summary_df = pd.DataFrame(summary_data)
+        summary_df.to_excel(writer, sheet_name="Summary", index=False)
 
-            # Write results sheet with all professional columns
-            results_df.to_excel(writer, sheet_name="Results", index=False)
+        # Write results sheet with all professional columns
+        results_df.to_excel(writer, sheet_name="Results", index=False)
 
-            # Write raw JSON data for debugging/advanced analysis
-            raw_df = pd.DataFrame([{"raw_json": json.dumps(raw_results, indent=2)}])
-            raw_df.to_excel(writer, sheet_name="Raw_Data", index=False)
+        # Write raw JSON data for debugging/advanced analysis
+        raw_df = pd.DataFrame([{"raw_json": json.dumps(raw_results, indent=2)}])
+        raw_df.to_excel(writer, sheet_name="Raw_Data", index=False)
 
-        output.seek(0)
-        return output
+    output.seek(0)
+    return output
 
 
 def get_validation_status_style(val):
@@ -553,6 +553,8 @@ def initialize_session_state():
         st.session_state.refining_field = None
     if 'live_log' not in st.session_state:
         st.session_state.live_log = []
+    if 'quota_warning' not in st.session_state:
+        st.session_state.quota_warning = None
 
 
 def main():
@@ -735,6 +737,7 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int, pr
         st.session_state.extraction_results = None
         st.session_state.current_project_id = None
         st.session_state.current_project_name = None
+        st.session_state.quota_warning = None
 
         # Initialize components
         progress_bar = st.progress(0)
@@ -866,7 +869,7 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int, pr
             return
 
         if quota_warning:
-            st.warning(f"⚠️ {quota_warning}")
+            st.session_state.quota_warning = quota_warning
             add_log_entry(f"Quota warning: {quota_warning}")
 
         progress_placeholder.empty()
@@ -1074,6 +1077,14 @@ def display_results():
 
     st.subheader("📊 Extraction Results")
 
+    # Prominent quota warning — persists across reruns via session state
+    if st.session_state.get("quota_warning"):
+        st.warning(
+            "⚠️ **Extraction paused due to API quota limits. "
+            "Showing partial results up to the last completed page.** "
+            f"\n\n{st.session_state.quota_warning}"
+        )
+
     if not st.session_state.extraction_results:
         st.info("No results to display. Please extract data from a PDF first.")
         return
@@ -1189,8 +1200,8 @@ def display_results():
 
     if not traceable_fields:
         st.info(
-            "Visual tracing is enabled automatically when Gemini returns spatial bounding box "
-            "data. Re-extract the PDF with the current model version to enable this feature."
+            "No visual trace data found in this extraction. "
+            "Re-extract the PDF to generate spatial bounding boxes for each field."
         )
     else:
         trace_options = [

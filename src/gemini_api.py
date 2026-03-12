@@ -145,6 +145,11 @@ class GeminiDataExtractor:
         reference is explicitly deleted and gc.collect() is called so memory
         is freed before the next page is loaded.
 
+        Smart Merge: a running master_dict is maintained across pages. After
+        each page, each field is updated in master_dict ONLY if the new
+        confidence score is strictly higher than the currently stored value for
+        that field. This ensures the best extraction from ANY page wins.
+
         If the Google API daily quota is exhausted mid-run, processing stops
         immediately and partial results gathered so far are returned rather
         than crashing the application.
@@ -154,19 +159,19 @@ class GeminiDataExtractor:
             extraction_fields: List of field codes to extract
             progress_callback: Optional callback(page_num, total_pages)
             total_pages: Total page count for progress / rate-limit logic
-
-        Returns:
-            Tuple of (aggregated_results_dict, quota_warning_str_or_None).
-            quota_warning_str is None when no quota issues occurred.
-
-        Args (additional):
-            checkpoint_callback: Optional callable(page_num, partial_aggregated_results).
+            checkpoint_callback: Optional callable(page_num, master_dict).
                 Called after every successful page so callers can persist
                 incremental data (e.g. write to Supabase) before the next page.
+
+        Returns:
+            Tuple of (master_dict, quota_warning_str_or_None).
+            quota_warning_str is None when no quota issues occurred.
         """
         print(f"Processing {total_pages} pages lazily (one at a time) with rate limiting...")
 
-        all_results = []
+        # master_dict holds the running best-confidence result per field across pages
+        master_dict: Dict[str, Dict] = {}
+        pages_processed = 0
         failed_pages = []
         quota_warning = None
         page_num = 0
@@ -175,24 +180,42 @@ class GeminiDataExtractor:
             page_num += 1
             try:
                 print(f"Processing page {page_num}/{total_pages}...")
-                result = self.extract_data_from_image(image, extraction_fields, page_num, page_text)
-                result["page_number"] = page_num
-                all_results.append(result)
+                page_result = self.extract_data_from_image(
+                    image, extraction_fields, page_num, page_text
+                )
 
+                # ── Smart Merge: best-confidence-wins per field ──────────────
+                # Iterate over this page's results and update master_dict only
+                # when the new confidence is strictly higher than what we have.
+                for field_code, field_data in page_result.items():
+                    if not isinstance(field_data, dict):
+                        continue
+                    new_conf = field_data.get("confidence", 0)
+                    if field_code not in master_dict:
+                        master_dict[field_code] = field_data
+                    elif new_conf > master_dict[field_code].get("confidence", 0):
+                        master_dict[field_code] = field_data
+
+                pages_processed += 1
+                print(f"Page {page_num} done — master_dict now has {len(master_dict)} fields.")
+
+                # Progress callback wrapped so UI errors can't kill the loop
                 if progress_callback:
-                    progress_callback(page_num, total_pages)
-
-                # Incremental checkpoint: persist partial results after every page
-                if checkpoint_callback and all_results:
                     try:
-                        partial = self._aggregate_results(all_results)
-                        checkpoint_callback(page_num, partial)
+                        progress_callback(page_num, total_pages)
+                    except Exception as prog_err:
+                        print(f"Progress callback warning (non-fatal): {prog_err}")
+
+                # Incremental checkpoint: persist the best-so-far master_dict to Supabase
+                if checkpoint_callback and master_dict:
+                    try:
+                        checkpoint_callback(page_num, master_dict)
                     except Exception as ckpt_err:
                         print(f"Checkpoint callback warning (non-fatal): {ckpt_err}")
 
-                # Rate limiting: 15 s between pages except after the last page
+                # Rate limiting: 15s between pages (never after the last page)
                 if total_pages > 0 and page_num < total_pages:
-                    print(f"Page {page_num}/{total_pages} - Success - Waiting 15s...")
+                    print(f"Waiting 15s before page {page_num + 1}/{total_pages}...")
                     time.sleep(15)
 
             except RuntimeError as e:
@@ -204,15 +227,15 @@ class GeminiDataExtractor:
                     # return whatever partial data was collected before the limit.
                     quota_warning = (
                         f"Google API daily quota exhausted after page {page_num - 1}. "
-                        f"Partial results from {len(all_results)} successfully extracted "
+                        f"Partial results from {pages_processed} successfully extracted "
                         "page(s) are shown. Please wait until tomorrow or upgrade your "
                         "Gemini API plan."
                     )
-                    print(f"Daily quota hit — stopping with {len(all_results)} partial result(s).")
-                    break  # exit for-loop; finally still runs for this iteration
+                    print(f"Daily quota hit — stopping with {pages_processed} partial result(s).")
+                    break  # Only valid early exit — daily quota cannot recover
 
                 failed_pages.append((page_num, error_msg))
-                # Still apply rate-limit delay on non-quota failures
+                # Apply rate-limit delay on non-quota failures too
                 if total_pages > 0 and page_num < total_pages:
                     time.sleep(15)
 
@@ -226,7 +249,7 @@ class GeminiDataExtractor:
             page_iterator.close()
 
         # If nothing succeeded at all, raise so the UI shows a clear error
-        if not all_results:
+        if not master_dict:
             if quota_warning:
                 raise RuntimeError(quota_warning)
             first_error = failed_pages[0][1] if failed_pages else "Unknown error"
@@ -238,8 +261,9 @@ class GeminiDataExtractor:
             print(f"Warning: {len(failed_pages)}/{total_pages} pages failed: "
                   f"{[p for p, _ in failed_pages]}")
 
-        aggregated = self._aggregate_results(all_results)
-        return aggregated, quota_warning
+        print(f"Extraction complete: {pages_processed}/{total_pages} pages succeeded, "
+              f"{len(master_dict)} fields in master_dict.")
+        return master_dict, quota_warning
 
     def refine_field_value(
         self, images: List[Image.Image], field_code: str, original_value: str, 

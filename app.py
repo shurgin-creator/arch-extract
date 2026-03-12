@@ -183,6 +183,53 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+# Units that indicate the field corresponds to a physical/spatial region on the drawing
+PHYSICAL_UNITS = {
+    "SF", "LF", "EA", "count", "ft", "ft²", "sqft", "sq ft", "lf", "ea",
+    "each", "pcs", "pieces", "SY", "CY", "ton", "tons",
+}
+
+
+@st.dialog("Visual Trace", width="large")
+def show_trace_dialog(field_code: str, field_data: dict, pdf_bytes: bytes, dpi: int):
+    """Render the highlighted page in a modal dialog."""
+    bb = field_data.get("bounding_box")
+    if not isinstance(bb, list) or len(bb) != 4:
+        st.info("No spatial bounding box is available for this field.")
+        return
+
+    # Parse page number from "Page N" string
+    page_ref = field_data.get("page_reference", "Page 1")
+    try:
+        page_num = int(str(page_ref).replace("Page", "").strip())
+    except Exception:
+        page_num = 1
+
+    unit = str(field_data.get("unit", "")).strip()
+    highlight_type = "region" if unit.upper() in {u.upper() for u in PHYSICAL_UNITS} else "text"
+
+    measure_name = field_data.get("measure_name", field_code)
+    value = field_data.get("value", "—")
+    unit_str = field_data.get("unit", "")
+
+    st.markdown(f"**Field:** `{field_code}` — {measure_name}")
+    st.markdown(
+        f"**Value:** {value} {unit_str} &nbsp;|&nbsp; **Page:** {page_ref} &nbsp;|&nbsp; "
+        f"**Highlight:** {'Filled region' if highlight_type == 'region' else 'Text outline'}",
+        unsafe_allow_html=True,
+    )
+
+    with st.spinner("Rendering page with highlight…"):
+        try:
+            processor = PDFProcessor(dpi=dpi, fmt="png")
+            highlighted = processor.render_page_with_highlight(
+                pdf_bytes, page_num, bb, highlight_type, dpi=dpi
+            )
+            st.image(highlighted, use_container_width=True)
+        except Exception as e:
+            st.error(f"Could not render highlight: {e}")
+
+
 def get_confidence_color(confidence: int) -> str:
     """Get CSS class for confidence level styling."""
     if confidence >= 80:
@@ -1125,6 +1172,50 @@ def display_results():
     # ── Smart DataGrid: tabs by category + confidence color-coding ──────────
     st.markdown("### 📋 All Extracted Data — by Category")
     display_categorized_dataframe(results_df)
+
+    st.divider()
+
+    # ── Visual Traceability ───────────────────────────────────────────────────
+    st.markdown("### 🔍 Visual Trace — Locate Fields on Drawing")
+
+    results_raw = st.session_state.extraction_results
+    traceable_fields = {
+        code: data
+        for code, data in results_raw.items()
+        if isinstance(data, dict)
+        and isinstance(data.get("bounding_box"), list)
+        and len(data["bounding_box"]) == 4
+    }
+
+    if not traceable_fields:
+        st.info(
+            "Visual tracing is enabled automatically when Gemini returns spatial bounding box "
+            "data. Re-extract the PDF with the current model version to enable this feature."
+        )
+    else:
+        trace_options = [
+            f"{code} — {data.get('measure_name', code)}"
+            for code, data in traceable_fields.items()
+        ]
+        trace_col1, trace_col2 = st.columns([3, 1])
+        with trace_col1:
+            selected_trace = st.selectbox(
+                "Select a field to locate on the drawing:",
+                options=trace_options,
+                key="trace_field_select",
+            )
+        with trace_col2:
+            view_trace = st.button("View Trace", use_container_width=True, key="view_trace_btn")
+
+        if view_trace and selected_trace:
+            trace_field_code = selected_trace.split(" — ")[0]
+            trace_field_data = traceable_fields[trace_field_code]
+            pdf_bytes = st.session_state.get("pdf_bytes_for_refine")
+            trace_dpi = st.session_state.get("pdf_dpi_for_refine", 200)
+            if not pdf_bytes:
+                st.warning("PDF data not available. Re-upload the PDF to enable visual tracing.")
+            else:
+                show_trace_dialog(trace_field_code, trace_field_data, pdf_bytes, trace_dpi)
 
     st.divider()
 

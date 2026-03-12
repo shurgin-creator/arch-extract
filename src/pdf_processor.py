@@ -450,6 +450,91 @@ class PDFProcessor:
         except Exception:
             return ""
 
+    def render_page_with_highlight(
+        self,
+        pdf_bytes: bytes,
+        page_num: int,
+        bounding_box: List[float],
+        highlight_type: str = "region",
+        dpi: int = 200,
+    ) -> Image.Image:
+        """
+        Render a single PDF page and draw a highlight overlay over the bounding box.
+
+        The page is converted to grayscale so the colored overlay stands out clearly.
+        Preprocessing (CLAHE, deskew) is applied so pixel coordinates match those
+        seen by Gemini during extraction.
+
+        Args:
+            pdf_bytes: PDF file as bytes
+            page_num: 1-based page number to render
+            bounding_box: [ymin, xmin, ymax, xmax] in 0-1000 normalized coordinates
+            highlight_type: "region" — semi-transparent yellow fill (alpha 0.35);
+                            "text"   — green outline rectangle only
+            dpi: Render resolution (default 200 — lower for speed at view time)
+
+        Returns:
+            PIL Image with highlight overlay
+        """
+        def _plain_render():
+            imgs = convert_from_bytes(
+                pdf_bytes, dpi=dpi, fmt="png",
+                poppler_path=self.poppler_path,
+                first_page=page_num, last_page=page_num,
+            )
+            return imgs[0]
+
+        if not _CV2_AVAILABLE:
+            return _plain_render()
+
+        try:
+            page_images = convert_from_bytes(
+                pdf_bytes, dpi=dpi, fmt="png",
+                poppler_path=self.poppler_path,
+                first_page=page_num, last_page=page_num,
+            )
+            image = page_images[0]
+            del page_images
+
+            # Apply the same preprocessing pipeline used during extraction so
+            # the bounding box coordinates Gemini returned align with the pixels.
+            if self.preprocess:
+                image = self.preprocess_image(image)
+
+            w, h = image.size
+            ymin, xmin, ymax, xmax = bounding_box
+
+            # Map 0-1000 normalized coordinates to pixel coordinates
+            x1 = int(xmin / 1000 * w)
+            y1 = int(ymin / 1000 * h)
+            x2 = int(xmax / 1000 * w)
+            y2 = int(ymax / 1000 * h)
+
+            # PIL → numpy BGR
+            img_np = np.array(image.convert("RGB"))
+            img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+
+            # Grayscale base with 3 channels so color overlays work
+            gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+            img_display = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+            if highlight_type == "region":
+                # Semi-transparent yellow filled rectangle — black lines show through
+                overlay = img_display.copy()
+                cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 255, 255), -1)  # BGR yellow
+                img_display = cv2.addWeighted(overlay, 0.35, img_display, 0.65, 0)
+            else:
+                # "text" — clean green outline only, 3px thick
+                cv2.rectangle(img_display, (x1, y1), (x2, y2), (0, 200, 100), 3)
+
+            # numpy BGR → PIL RGB
+            img_rgb = cv2.cvtColor(img_display, cv2.COLOR_BGR2RGB)
+            return Image.fromarray(img_rgb)
+
+        except Exception as e:
+            print(f"render_page_with_highlight warning (non-fatal): {e}")
+            return _plain_render()
+
     def get_image_bytes(self, image: Image.Image) -> bytes:
         """
         Convert PIL Image to bytes for API transmission.

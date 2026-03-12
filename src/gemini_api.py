@@ -573,7 +573,8 @@ Map field names/codes to this ENHANCED structure:
             "category": "General",
             "reasoning": "Found on Page 1, Title Block, clearly printed as plan identifier",
             "validation_status": "verified",
-            "page_reference": "Page 1"
+            "page_reference": "Page 1",
+            "bounding_box": [245, 120, 380, 450]
         }}
     }}
 }}
@@ -586,6 +587,24 @@ PROFESSIONAL VALIDATION STATUS CODES (Must be one of these):
 - "scale_uncertain": Scale not clearly identified (may affect accuracy)
 - "inferred": Data inferred from partial information
 - "not_found": Data not present in provided pages
+
+================================================================================
+SPATIAL TRACEABILITY
+================================================================================
+
+For EVERY extracted field, attempt to identify the bounding box of the region on
+the page where the value was found or measured. Return this as a normalized
+coordinate list: [ymin, xmin, ymax, xmax] where all values are integers in the
+range 0–1000 (0 = top/left edge, 1000 = bottom/right edge of the page).
+
+Rules:
+- If you can pinpoint the region (e.g., a dimension string, a label, a title
+  block cell), output the tight bounding box around that region.
+- If the field was inferred from multiple regions or cannot be localized, omit
+  the key or set it to null — never guess.
+- Prefer small, precise boxes over large vague ones.
+
+Add "bounding_box" to EVERY field object in extracted_fields. Null is valid.
 
 CRITICAL REQUIREMENTS:
 - Use standardized codes

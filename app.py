@@ -400,10 +400,10 @@ def format_extraction_results(results: dict) -> pd.DataFrame:
     return df
 
 
-def create_excel_export(results_df: pd.DataFrame, raw_results: dict) -> BytesIO:
+def create_excel_export(results_df: pd.DataFrame, raw_results: dict) -> bytes:
     """Create an Excel file with formatted results including professional accuracy data."""
     output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         # Write summary sheet
         summary_data = {
             "Metric": ["Total Fields", "Fields Extracted", "Average Confidence", "High Confidence (>80%)", "Validation Issues", "Pages Processed"],
@@ -426,8 +426,8 @@ def create_excel_export(results_df: pd.DataFrame, raw_results: dict) -> BytesIO:
         raw_df = pd.DataFrame([{"raw_json": json.dumps(raw_results, indent=2)}])
         raw_df.to_excel(writer, sheet_name="Raw_Data", index=False)
 
-    output.seek(0)
-    return output
+    # Extract bytes AFTER ExcelWriter closes so the buffer is fully flushed
+    return output.getvalue()
 
 
 def get_validation_status_style(val):
@@ -1187,6 +1187,7 @@ def display_results():
     st.divider()
 
     # ── Visual Traceability ───────────────────────────────────────────────────
+    # Header and fallback banner always render — never hidden behind a condition.
     st.markdown("### 🔍 Visual Trace — Locate Fields on Drawing")
 
     results_raw = st.session_state.extraction_results

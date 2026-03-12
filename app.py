@@ -213,6 +213,35 @@ def display_live_log():
     st.markdown(f"""<div class="live-log">{log_content}</div>""", unsafe_allow_html=True)
 
 
+def delete_project(project_id: str, filename: str):
+    """
+    Delete a project from Supabase:
+      1. Remove the PDF file from the 'pdfs' storage bucket.
+      2. Delete the project row from the 'projects' table.
+    Raises on DB failure so the caller can show the error.
+    """
+    supabase = get_supabase()
+    user = st.session_state.get("user")
+
+    # Delete PDF from storage (non-fatal — file may not exist)
+    if user and filename:
+        try:
+            storage_path = f"{user.id}/{filename}"
+            supabase.storage.from_("pdfs").remove([storage_path])
+        except Exception as storage_err:
+            print(f"Storage delete warning (non-fatal): {storage_err}")
+
+    # Delete the DB row — raises if it fails
+    supabase.table("projects").delete().eq("id", project_id).execute()
+
+    # If the deleted project was currently loaded, clear it from session state
+    if st.session_state.get("current_project_id") == project_id:
+        st.session_state.extraction_results = None
+        st.session_state.current_project_id = None
+        st.session_state.current_project_name = None
+        st.session_state.pdf_processed = False
+
+
 def show_project_history():
     """Display project history from Supabase in the sidebar."""
     st.markdown('<div class="sidebar-title">📁 Project History</div>', unsafe_allow_html=True)
@@ -256,11 +285,10 @@ def show_project_history():
         with col2:
             if st.button("🗑️", key=f"delete_{project['id']}", help="Delete this project"):
                 try:
-                    supabase.table("projects").delete().eq("id", project["id"]).execute()
-                    st.success(f"Deleted {project['project_name']}")
+                    delete_project(project["id"], project.get("filename", ""))
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Failed to delete: {e}")
+                    st.error(f"Delete failed: {e}")
 
 
 def display_confidence_badge(confidence: int) -> str:
@@ -962,16 +990,19 @@ def display_categorized_dataframe(results_df: pd.DataFrame):
         "AI Reasoning / Source": st.column_config.TextColumn("AI Reasoning / Source", width="large"),
     }
 
-    tabs = st.tabs(categories)
-    for tab, category in zip(tabs, categories):
-        with tab:
-            cat_df = results_df[results_df["Category"] == category][show_cols].reset_index(drop=True)
-            if cat_df.empty:
-                st.info(f"No fields extracted for **{category}**.")
-                continue
-            styled = _apply_confidence_style(cat_df)
-            st.dataframe(styled, use_container_width=True, hide_index=True, column_config=col_config)
-            st.caption(f"{len(cat_df)} field{'s' if len(cat_df) != 1 else ''} in this category")
+    selected_category = st.selectbox(
+        "Select Category to View",
+        options=categories,
+        key="category_select",
+    )
+
+    cat_df = results_df[results_df["Category"] == selected_category][show_cols].reset_index(drop=True)
+    if cat_df.empty:
+        st.info(f"No fields extracted for **{selected_category}**.")
+        return
+    styled = _apply_confidence_style(cat_df)
+    st.dataframe(styled, use_container_width=True, hide_index=True, column_config=col_config)
+    st.caption(f"{len(cat_df)} field{'s' if len(cat_df) != 1 else ''} in **{selected_category}**")
 
 
 def display_results():

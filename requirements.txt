@@ -11,3 +11,7 @@ openpyxl
 PyMuPDF
 # Cloud persistence and auth (Phase 2/3)
 supabase
+# Image preprocessing Super Skills (Phase 3 accuracy boost)
+# headless variant required for Streamlit Cloud (no display server)
+opencv-python-headless
+numpy

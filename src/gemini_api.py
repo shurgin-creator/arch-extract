@@ -43,7 +43,7 @@ class GeminiDataExtractor:
 
     def extract_data_from_image(
         self, image: Image.Image, extraction_fields: List[str], page_num: int = 1,
-        page_text: str = ""
+        page_text: str = "", title_block_crop: Optional[Image.Image] = None
     ) -> Dict[str, Dict[str, any]]:
         """
         Extract architectural data from a single image using Gemini.
@@ -82,14 +82,26 @@ class GeminiDataExtractor:
                         "by the extracted text.\n"
                     )
 
-                contents = [
-                    system_prompt,
-                    image,
+                contents = [system_prompt, image]
+
+                # Super Skill 3: inject the title block crop when available so
+                # Gemini receives a zoomed close-up of the region that contains
+                # project name, scale, drawing number, date, etc.
+                if title_block_crop is not None:
+                    contents.append(
+                        "The image below is a zoomed high-resolution crop of the "
+                        "TITLE BLOCK region of this page. Use it to extract "
+                        "project metadata fields (scale, drawing number, date, "
+                        "client, etc.) with higher precision:"
+                    )
+                    contents.append(title_block_crop)
+
+                contents.append(
                     f"\n\nIMPORTANT: You are currently analyzing PAGE {page_num} of the original PDF. "
                     f"In your reasoning and page_reference fields, you MUST write 'Page {page_num}'.\n"
                     + hybrid_context
                     + "\nPlease extract the requested data and return results as JSON."
-                ]
+                )
                 
                 response = self.client.models.generate_content(
                     model=self.model_name,
@@ -155,7 +167,9 @@ class GeminiDataExtractor:
         than crashing the application.
 
         Args:
-            page_iterator: Iterable of (PIL.Image, page_text_str) tuples
+            page_iterator: Iterable of (PIL.Image, page_text_str, title_block_crop)
+                tuples — typically from PDFProcessor.iter_pages().
+                title_block_crop is a PIL Image or None.
             extraction_fields: List of field codes to extract
             progress_callback: Optional callback(page_num, total_pages)
             total_pages: Total page count for progress / rate-limit logic
@@ -176,12 +190,13 @@ class GeminiDataExtractor:
         quota_warning = None
         page_num = 0
 
-        for image, page_text in page_iterator:
+        for image, page_text, title_block_crop in page_iterator:
             page_num += 1
             try:
                 print(f"Processing page {page_num}/{total_pages}...")
                 page_result = self.extract_data_from_image(
-                    image, extraction_fields, page_num, page_text
+                    image, extraction_fields, page_num, page_text,
+                    title_block_crop=title_block_crop,
                 )
 
                 # ── Smart Merge: best-confidence-wins per field ──────────────
@@ -242,6 +257,8 @@ class GeminiDataExtractor:
             finally:
                 # Explicit memory release after each page regardless of outcome
                 del image
+                if title_block_crop is not None:
+                    del title_block_crop
                 gc.collect()
 
         # Close the generator explicitly so fitz doc is released promptly

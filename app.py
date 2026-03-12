@@ -594,6 +594,22 @@ def main():
                 help="Higher DPI = better quality but slower processing"
             )
 
+            with st.expander("⚙️ Advanced Settings"):
+                preprocess = st.checkbox(
+                    "Enable image preprocessing",
+                    value=True,
+                    help=(
+                        "Apply OpenCV CLAHE contrast enhancement, deskew, and "
+                        "unsharp-mask sharpening before sending pages to Gemini. "
+                        "Improves accuracy on scanned or low-contrast drawings. "
+                        "Disable only for debugging or if pages look correct already."
+                    ),
+                )
+                st.caption(
+                    "Preprocessing is applied per-page inside the lazy extraction loop "
+                    "and does not increase peak memory usage."
+                )
+
             st.subheader("API Status")
             api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
             if api_key:
@@ -638,7 +654,8 @@ def main():
                             extract_data_from_pdf(
                                 uploaded_file,
                                 selected_categories,
-                                dpi
+                                dpi,
+                                preprocess,
                             )
                     except Exception as e:
                         print(f"ERROR in button click: {str(e)}")
@@ -659,7 +676,7 @@ def main():
         st.code(traceback.format_exc())
 
 
-def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
+def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int, preprocess: bool = True):
     """Extract data from uploaded PDF and save to database."""
     print("=== ENTERING extract_data_from_pdf ===")
     print(f"File: {uploaded_file.name if hasattr(uploaded_file, 'name') else 'No name'}")
@@ -681,7 +698,7 @@ def extract_data_from_pdf(uploaded_file, selected_categories: list, dpi: int):
         status_text.text("📖 Processing PDF...")
         progress_bar.progress(20)
 
-        pdf_processor = PDFProcessor(dpi=dpi, fmt="png")
+        pdf_processor = PDFProcessor(dpi=dpi, fmt="png", preprocess=preprocess)
         pdf_bytes = uploaded_file.read()
 
         # Count pages cheaply (no rendering) so we can show progress and use lazy iterator

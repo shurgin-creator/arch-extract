@@ -225,7 +225,7 @@ def show_trace_dialog(field_code: str, field_data: dict, pdf_bytes: bytes, dpi: 
             highlighted = processor.render_page_with_highlight(
                 pdf_bytes, page_num, bb, highlight_type, dpi=dpi
             )
-            st.image(highlighted, use_container_width=True)
+            st.image(highlighted, width="stretch")
         except Exception as e:
             st.error(f"Could not render highlight: {e}")
 

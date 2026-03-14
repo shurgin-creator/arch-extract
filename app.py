@@ -230,6 +230,73 @@ def show_trace_dialog(field_code: str, field_data: dict, pdf_bytes: bytes, dpi: 
             st.error(f"Could not render highlight: {e}")
 
 
+@st.dialog("PDF Required — Re-upload to Enable Trace", width="large")
+def show_pdf_required_dialog(field_code: str, field_data: dict, dpi: int):
+    """
+    Shown when pdf_bytes is unavailable (old project not yet in Supabase storage).
+    Lets the user re-upload the PDF, permanently fixes the storage gap, then renders the trace.
+    """
+    st.info(
+        "This project was extracted before cloud PDF storage was enabled. "
+        "Re-upload the original PDF once — it will be saved permanently so "
+        "you won't need to do this again."
+    )
+    uploaded = st.file_uploader("Re-upload the PDF", type="pdf", key="reupload_pdf_dialog")
+    if not uploaded:
+        return
+
+    pdf_bytes = uploaded.getvalue()
+    st.session_state.pdf_bytes_for_refine = pdf_bytes
+
+    # Permanently fix Supabase storage so future sessions work without re-uploading
+    user = st.session_state.get("user")
+    project_id = st.session_state.get("current_project_id")
+    if user and project_id:
+        try:
+            sb = get_supabase()
+            resp = sb.table("projects").select("filename").eq("id", project_id).single().execute()
+            filename = (resp.data.get("filename") if resp.data else None) or uploaded.name
+            storage_path = f"{user.id}/{filename}"
+            sb.storage.from_("pdfs").upload(
+                path=storage_path,
+                file=pdf_bytes,
+                file_options={"content-type": "application/pdf", "upsert": "true"},
+            )
+            st.success("PDF saved to cloud storage — Visual Trace will work automatically in all future sessions.")
+        except Exception as e:
+            st.warning(f"Cloud save failed (non-fatal): {e}")
+
+    # Render trace inline (can't nest @st.dialog calls, so we render directly here)
+    bb = field_data.get("bounding_box")
+    if not isinstance(bb, list) or len(bb) != 4:
+        st.info("No bounding box available for this field.")
+        return
+
+    page_ref = field_data.get("page_reference", "Page 1")
+    try:
+        page_num = int(str(page_ref).replace("Page", "").strip())
+    except Exception:
+        page_num = 1
+
+    unit = str(field_data.get("unit", "")).strip()
+    highlight_type = "region" if unit.upper() in {u.upper() for u in PHYSICAL_UNITS} else "text"
+
+    st.markdown(f"**Field:** `{field_code}` — {field_data.get('measure_name', field_code)}")
+    st.markdown(
+        f"**Value:** {field_data.get('value', '—')} {field_data.get('unit', '')} &nbsp;|&nbsp; "
+        f"**Page:** {page_ref} &nbsp;|&nbsp; "
+        f"**Highlight:** {'Filled region' if highlight_type == 'region' else 'Text outline'}",
+        unsafe_allow_html=True,
+    )
+    with st.spinner("Rendering trace…"):
+        try:
+            processor = PDFProcessor(dpi=dpi, fmt="png")
+            highlighted = processor.render_page_with_highlight(pdf_bytes, page_num, bb, highlight_type, dpi=dpi)
+            st.image(highlighted, width="stretch")
+        except Exception as e:
+            st.error(f"Could not render highlight: {e}")
+
+
 def get_confidence_color(confidence: int) -> str:
     """Get CSS class for confidence level styling."""
     if confidence >= 80:
@@ -1025,30 +1092,6 @@ def refine_field(field_code: str, field_row: pd.Series, user_feedback: str, resu
         st.exception(e)
 
 
-def _apply_confidence_style(df: pd.DataFrame):
-    """Return a Pandas Styler with green/yellow/red coloring on the Confidence Level column."""
-    col = "Confidence Level"
-    if col not in df.columns:
-        return df.style
-
-    def _color(val: str) -> str:
-        try:
-            num = int(str(val).rstrip("%").strip())
-        except Exception:
-            return "background-color: #f8d7da; color: #721c24; font-weight: bold;"
-        if num == 100:
-            return "background-color: #d4edda; color: #155724; font-weight: bold;"
-        elif num >= 80:
-            return "background-color: #fff3cd; color: #856404; font-weight: bold;"
-        else:
-            return "background-color: #f8d7da; color: #721c24; font-weight: bold;"
-
-    try:
-        return df.style.map(_color, subset=[col])
-    except AttributeError:
-        # pandas < 2.1 uses applymap
-        return df.style.applymap(_color, subset=[col])
-
 
 def _get_pdf_bytes() -> bytes | None:
     """
@@ -1085,8 +1128,10 @@ def _get_pdf_bytes() -> bytes | None:
 
 def display_categorized_dataframe(results_df: pd.DataFrame):
     """
-    Split results_df by Category and render each category in its own selectbox tab.
-    Rows are selectable — clicking a row triggers the Visual Trace dialog.
+    Split results_df by Category via a selectbox, then render a custom
+    row-by-row grid with a native 🔍 Trace button on every row that has a
+    bounding box. Clicking Trace opens show_trace_dialog (or the PDF
+    re-upload fallback dialog if the PDF is unavailable).
     """
     if results_df.empty:
         st.info("No data to display.")
@@ -1101,16 +1146,6 @@ def display_categorized_dataframe(results_df: pd.DataFrame):
         "Confidence Level", "Page Reference", "AI Reasoning / Source",
     ] if c in results_df.columns]
 
-    col_config = {
-        "Code":                  st.column_config.TextColumn("Code",        width="small"),
-        "Key Measure":           st.column_config.TextColumn("Measure",     width="medium"),
-        "Value":                 st.column_config.TextColumn("Value",       width="small"),
-        "Unit":                  st.column_config.TextColumn("Unit",        width="small"),
-        "Confidence Level":      st.column_config.TextColumn("Confidence",  width="small"),
-        "Page Reference":        st.column_config.TextColumn("Page",        width="small"),
-        "AI Reasoning / Source": st.column_config.TextColumn("AI Reasoning / Source", width="large"),
-    }
-
     selected_category = st.selectbox(
         "Select Category to View",
         options=categories,
@@ -1122,42 +1157,70 @@ def display_categorized_dataframe(results_df: pd.DataFrame):
         st.info(f"No fields extracted for **{selected_category}**.")
         return
 
-    styled = _apply_confidence_style(cat_df)
-    st.dataframe(styled, use_container_width=True, hide_index=True, column_config=col_config)
-    st.caption(f"{len(cat_df)} field{'s' if len(cat_df) != 1 else ''} in **{selected_category}**")
-
-    # ── Visual Trace Tool (per-category) ─────────────────────────────────────
     results_raw = st.session_state.extraction_results or {}
-    traceable = {
-        code: results_raw[code]
-        for code in cat_df["Code"]
-        if code in results_raw
-        and isinstance(results_raw[code].get("bounding_box"), list)
-        and len(results_raw[code]["bounding_box"]) == 4
-    }
+    dpi = st.session_state.get("pdf_dpi_for_refine", 200)
 
-    if traceable:
-        st.markdown("**🔍 Visual Trace Tool**")
-        trace_col1, trace_col2 = st.columns([3, 1])
-        with trace_col1:
-            trace_options = [
-                f"{code} — {results_raw[code].get('measure_name', code)}"
-                for code in traceable
-            ]
-            selected_trace = st.selectbox(
-                "Select a field to locate on the plan:",
-                options=trace_options,
-                key=f"trace_select_{selected_category}",
-                label_visibility="collapsed",
+    # ── Column widths: Code | Measure | Value | Unit | Confidence | Page | Reasoning | Trace ──
+    WIDTHS = [0.7, 1.8, 0.8, 0.6, 0.7, 0.6, 3.5, 0.9]
+
+    # Header row
+    hdr = st.columns(WIDTHS)
+    labels = ["Code", "Key Measure", "Value", "Unit", "Confidence", "Page", "AI Reasoning / Source", "Trace"]
+    for col, lbl in zip(hdr, labels):
+        col.markdown(f"**{lbl}**")
+    st.markdown("<hr style='margin:4px 0 8px 0; border-color:#e0e0e0;'>", unsafe_allow_html=True)
+
+    # Data rows
+    for _, row in cat_df.iterrows():
+        cols = st.columns(WIDTHS)
+        cols[0].write(row.get("Code", ""))
+        cols[1].write(row.get("Key Measure", ""))
+        cols[2].write(str(row.get("Value", "")))
+        cols[3].write(str(row.get("Unit", "")))
+
+        # Confidence with inline color
+        conf_str = str(row.get("Confidence Level", ""))
+        try:
+            conf_num = int(conf_str.rstrip("%").strip())
+            if conf_num == 100:
+                color = "#155724"; bg = "#d4edda"
+            elif conf_num >= 80:
+                color = "#856404"; bg = "#fff3cd"
+            else:
+                color = "#721c24"; bg = "#f8d7da"
+            cols[4].markdown(
+                f'<span style="background:{bg};color:{color};padding:2px 6px;'
+                f'border-radius:4px;font-weight:bold;font-size:0.85em;">{conf_str}</span>',
+                unsafe_allow_html=True,
             )
-        with trace_col2:
-            if st.button("🔍 View on Plan", key=f"trace_btn_{selected_category}", use_container_width=True):
-                trace_code = selected_trace.split(" — ")[0]
+        except Exception:
+            cols[4].write(conf_str)
+
+        cols[5].write(str(row.get("Page Reference", "")))
+
+        reasoning = str(row.get("AI Reasoning / Source", ""))
+        cols[6].caption(reasoning[:160] + ("…" if len(reasoning) > 160 else ""))
+
+        field_code = row.get("Code", "")
+        field_data_raw = results_raw.get(field_code, {})
+        has_bbox = (
+            isinstance(field_data_raw.get("bounding_box"), list)
+            and len(field_data_raw["bounding_box"]) == 4
+        )
+        # Sanitize key: replace spaces and special chars
+        safe_key = f"trace_{selected_category}_{field_code}".replace(" ", "_").replace("/", "_")
+
+        if has_bbox:
+            if cols[7].button("🔍 Trace", key=safe_key, use_container_width=True):
                 pdf_bytes = _get_pdf_bytes()
-                if not pdf_bytes:
-                    st.warning("PDF data not available. Re-upload the PDF or check Supabase storage.")
+                if pdf_bytes:
+                    show_trace_dialog(field_code, field_data_raw, pdf_bytes, dpi)
                 else:
-                    show_trace_dialog(trace_code, traceable[trace_code], pdf_bytes, st.session_state.get("pdf_dpi_for_refine", 200))
+                    show_pdf_required_dialog(field_code, field_data_raw, dpi)
+        else:
+            cols[7].markdown("<span style='color:#aaa;font-size:0.85em;'>no trace</span>", unsafe_allow_html=True)
+
+    st.caption(f"{len(cat_df)} field{'s' if len(cat_df) != 1 else ''} in **{selected_category}**")
 
 
 def display_results():

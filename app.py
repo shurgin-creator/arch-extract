@@ -680,6 +680,27 @@ def main():
         with col2:
             st.subheader("🔄 Processing")
             if uploaded_file:
+                # Upload PDF to Supabase storage as soon as a file is selected
+                # so _get_pdf_bytes() can retrieve it even across sessions.
+                _upload_key = f"_uploaded_{uploaded_file.name}_{uploaded_file.size}"
+                if _upload_key not in st.session_state:
+                    _upload_user = st.session_state.get("user")
+                    if _upload_user:
+                        try:
+                            _sb = get_supabase()
+                            _storage_path = f"{_upload_user.id}/{uploaded_file.name}"
+                            _sb.storage.from_("pdfs").upload(
+                                path=_storage_path,
+                                file=uploaded_file.getvalue(),
+                                file_options={"content-type": "application/pdf", "upsert": "true"},
+                            )
+                        except Exception as _upload_err:
+                            st.warning(
+                                f"Could not pre-upload PDF to cloud storage "
+                                f"(Visual Trace for history projects may be unavailable): {_upload_err}"
+                            )
+                    st.session_state[_upload_key] = True
+
                 if st.button("Extract Data", type="primary", use_container_width=True):
                     print("Button clicked!")
                     print(f"Processing file: {uploaded_file.name}")
@@ -1102,38 +1123,41 @@ def display_categorized_dataframe(results_df: pd.DataFrame):
         return
 
     styled = _apply_confidence_style(cat_df)
-    df_key = f"df_{selected_category}"
-    event = st.dataframe(
-        styled,
-        use_container_width=True,
-        hide_index=True,
-        column_config=col_config,
-        selection_mode="single-row",
-        on_select="rerun",
-        key=df_key,
-    )
-    st.caption(
-        f"{len(cat_df)} field{'s' if len(cat_df) != 1 else ''} in **{selected_category}** "
-        "— click a row to view its location on the drawing"
-    )
+    st.dataframe(styled, use_container_width=True, hide_index=True, column_config=col_config)
+    st.caption(f"{len(cat_df)} field{'s' if len(cat_df) != 1 else ''} in **{selected_category}**")
 
-    # Handle row selection → trigger Visual Trace dialog
-    selected_rows = (event.selection or {}).get("rows", [])
-    if selected_rows:
-        row_idx = selected_rows[0]
-        field_code = cat_df.iloc[row_idx]["Code"]
-        results_raw = st.session_state.extraction_results or {}
-        field_data = results_raw.get(field_code, {})
+    # ── Visual Trace Tool (per-category) ─────────────────────────────────────
+    results_raw = st.session_state.extraction_results or {}
+    traceable = {
+        code: results_raw[code]
+        for code in cat_df["Code"]
+        if code in results_raw
+        and isinstance(results_raw[code].get("bounding_box"), list)
+        and len(results_raw[code]["bounding_box"]) == 4
+    }
 
-        if not isinstance(field_data.get("bounding_box"), list) or len(field_data.get("bounding_box", [])) != 4:
-            st.info(f"No spatial bounding box available for **{field_code}**. Re-extract the PDF to generate trace data.")
-        else:
-            pdf_bytes = _get_pdf_bytes()
-            if not pdf_bytes:
-                st.warning("PDF data not available. Re-upload the PDF or check Supabase storage to enable visual tracing.")
-            else:
-                dpi = st.session_state.get("pdf_dpi_for_refine", 200)
-                show_trace_dialog(field_code, field_data, pdf_bytes, dpi)
+    if traceable:
+        st.markdown("**🔍 Visual Trace Tool**")
+        trace_col1, trace_col2 = st.columns([3, 1])
+        with trace_col1:
+            trace_options = [
+                f"{code} — {results_raw[code].get('measure_name', code)}"
+                for code in traceable
+            ]
+            selected_trace = st.selectbox(
+                "Select a field to locate on the plan:",
+                options=trace_options,
+                key=f"trace_select_{selected_category}",
+                label_visibility="collapsed",
+            )
+        with trace_col2:
+            if st.button("🔍 View on Plan", key=f"trace_btn_{selected_category}", use_container_width=True):
+                trace_code = selected_trace.split(" — ")[0]
+                pdf_bytes = _get_pdf_bytes()
+                if not pdf_bytes:
+                    st.warning("PDF data not available. Re-upload the PDF or check Supabase storage.")
+                else:
+                    show_trace_dialog(trace_code, traceable[trace_code], pdf_bytes, st.session_state.get("pdf_dpi_for_refine", 200))
 
 
 def display_results():

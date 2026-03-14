@@ -1029,10 +1029,43 @@ def _apply_confidence_style(df: pd.DataFrame):
         return df.style.applymap(_color, subset=[col])
 
 
+def _get_pdf_bytes() -> bytes | None:
+    """
+    Return PDF bytes from session state, falling back to Supabase storage if missing.
+    Returns None if unavailable.
+    """
+    pdf_bytes = st.session_state.get("pdf_bytes_for_refine")
+    if pdf_bytes:
+        return pdf_bytes
+
+    # Try to fetch from Supabase storage using the current project's filename
+    user = st.session_state.get("user")
+    project_id = st.session_state.get("current_project_id")
+    if not user or not project_id:
+        return None
+
+    try:
+        supabase = get_supabase()
+        # Look up the filename from the project row
+        resp = supabase.table("projects").select("filename").eq("id", project_id).single().execute()
+        filename = resp.data.get("filename") if resp.data else None
+        if not filename:
+            return None
+
+        storage_path = f"{user.id}/{filename}"
+        pdf_bytes = supabase.storage.from_("pdfs").download(storage_path)
+        # Cache for the rest of this session
+        st.session_state.pdf_bytes_for_refine = pdf_bytes
+        return pdf_bytes
+    except Exception as e:
+        print(f"PDF fetch from Supabase warning: {e}")
+        return None
+
+
 def display_categorized_dataframe(results_df: pd.DataFrame):
     """
-    Split results_df by Category and render each category in its own st.tab.
-    Each tab's table has confidence color-coding via Pandas Styler.
+    Split results_df by Category and render each category in its own selectbox tab.
+    Rows are selectable — clicking a row triggers the Visual Trace dialog.
     """
     if results_df.empty:
         st.info("No data to display.")
@@ -1067,9 +1100,40 @@ def display_categorized_dataframe(results_df: pd.DataFrame):
     if cat_df.empty:
         st.info(f"No fields extracted for **{selected_category}**.")
         return
+
     styled = _apply_confidence_style(cat_df)
-    st.dataframe(styled, use_container_width=True, hide_index=True, column_config=col_config)
-    st.caption(f"{len(cat_df)} field{'s' if len(cat_df) != 1 else ''} in **{selected_category}**")
+    df_key = f"df_{selected_category}"
+    event = st.dataframe(
+        styled,
+        use_container_width=True,
+        hide_index=True,
+        column_config=col_config,
+        selection_mode="single-row",
+        on_select="rerun",
+        key=df_key,
+    )
+    st.caption(
+        f"{len(cat_df)} field{'s' if len(cat_df) != 1 else ''} in **{selected_category}** "
+        "— click a row to view its location on the drawing"
+    )
+
+    # Handle row selection → trigger Visual Trace dialog
+    selected_rows = (event.selection or {}).get("rows", [])
+    if selected_rows:
+        row_idx = selected_rows[0]
+        field_code = cat_df.iloc[row_idx]["Code"]
+        results_raw = st.session_state.extraction_results or {}
+        field_data = results_raw.get(field_code, {})
+
+        if not isinstance(field_data.get("bounding_box"), list) or len(field_data.get("bounding_box", [])) != 4:
+            st.info(f"No spatial bounding box available for **{field_code}**. Re-extract the PDF to generate trace data.")
+        else:
+            pdf_bytes = _get_pdf_bytes()
+            if not pdf_bytes:
+                st.warning("PDF data not available. Re-upload the PDF or check Supabase storage to enable visual tracing.")
+            else:
+                dpi = st.session_state.get("pdf_dpi_for_refine", 200)
+                show_trace_dialog(field_code, field_data, pdf_bytes, dpi)
 
 
 def display_results():
@@ -1183,51 +1247,6 @@ def display_results():
     # ── Smart DataGrid: tabs by category + confidence color-coding ──────────
     st.markdown("### 📋 All Extracted Data — by Category")
     display_categorized_dataframe(results_df)
-
-    st.divider()
-
-    # ── Visual Traceability ───────────────────────────────────────────────────
-    # Header and fallback banner always render — never hidden behind a condition.
-    st.markdown("### 🔍 Visual Trace — Locate Fields on Drawing")
-
-    results_raw = st.session_state.extraction_results
-    traceable_fields = {
-        code: data
-        for code, data in results_raw.items()
-        if isinstance(data, dict)
-        and isinstance(data.get("bounding_box"), list)
-        and len(data["bounding_box"]) == 4
-    }
-
-    if not traceable_fields:
-        st.info(
-            "No visual trace data found in this extraction. "
-            "Re-extract the PDF to generate spatial bounding boxes for each field."
-        )
-    else:
-        trace_options = [
-            f"{code} — {data.get('measure_name', code)}"
-            for code, data in traceable_fields.items()
-        ]
-        trace_col1, trace_col2 = st.columns([3, 1])
-        with trace_col1:
-            selected_trace = st.selectbox(
-                "Select a field to locate on the drawing:",
-                options=trace_options,
-                key="trace_field_select",
-            )
-        with trace_col2:
-            view_trace = st.button("View Trace", use_container_width=True, key="view_trace_btn")
-
-        if view_trace and selected_trace:
-            trace_field_code = selected_trace.split(" — ")[0]
-            trace_field_data = traceable_fields[trace_field_code]
-            pdf_bytes = st.session_state.get("pdf_bytes_for_refine")
-            trace_dpi = st.session_state.get("pdf_dpi_for_refine", 200)
-            if not pdf_bytes:
-                st.warning("PDF data not available. Re-upload the PDF to enable visual tracing.")
-            else:
-                show_trace_dialog(trace_field_code, trace_field_data, pdf_bytes, trace_dpi)
 
     st.divider()
 

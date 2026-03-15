@@ -621,7 +621,7 @@ class PDFProcessor:
         sx2 = min(img_w - 1, px2 + ex)
         sy2 = min(img_h - 1, py2 + ey)
 
-        min_length = img_w * 0.015  # noise threshold: 1.5% of image width
+        min_length = img_w * 0.003  # noise threshold: 0.3% of image width (filters only dots/text artifacts)
 
         def _path_length(pts):
             total = 0.0

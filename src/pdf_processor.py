@@ -510,15 +510,15 @@ class PDFProcessor:
 
             # page.get_drawings() returns coordinates in the PDF's raw user-space,
             # which has NOT had page rotation or CropBox offsets applied.
-            # page.get_pixmap(matrix=mat) renders in the canonical "device" space,
-            # which HAS had rotation/CropBox applied.
+            # page.get_pixmap(matrix=mat) renders in canonical device-space where
+            # pixel (0,0) corresponds to page.rect.tl (the CropBox origin), not PDF (0,0).
             #
-            # page.transformation_matrix maps:
-            #   PDF user-space coords  →  canonical MuPDF device-space coords
-            #
-            # So the full PDF-coords → pixel transform is:
-            #   combined = page.transformation_matrix * mat
-            combined_mat = page.transformation_matrix * mat
+            # Correct transform: rotate → subtract CropBox origin → scale to pixels
+            #   1. page.rotation_matrix:  apply page rotation
+            #   2. offset_mat:            translate so CropBox top-left → origin
+            #   3. scale_mat:             scale PDF points → pixels at target DPI
+            offset_mat = fitz.Matrix(1, 0, 0, 1, -page.rect.x0, -page.rect.y0)
+            combined_mat = page.rotation_matrix * offset_mat * mat
 
             drawings = page.get_drawings()
             color = (200, 200, 0)  # bright cyan in BGR

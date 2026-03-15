@@ -621,7 +621,7 @@ class PDFProcessor:
         sx2 = min(img_w - 1, px2 + ex)
         sy2 = min(img_h - 1, py2 + ey)
 
-        min_length = img_w * 0.003  # noise threshold: 0.3% of image width (filters only dots/text artifacts)
+        min_length = img_w * 0.008  # structural threshold: 0.8% of image width
 
         def _path_length(pts):
             total = 0.0
@@ -636,9 +636,19 @@ class PDFProcessor:
             # Keep if any point is inside the search zone
             if not any(sx1 <= x <= sx2 and sy1 <= y <= sy2 for x, y in path):
                 continue
-            # Discard noise by minimum length
-            if _path_length(path) < min_length:
+
+            # ── Structural geometry filters ──
+
+            # 1. Point-count gate: complex paths (text glyphs, arcs, hatching) have
+            #    many sampled points. Walls are simple — reject paths with > 4 points.
+            if len(path) > 4:
                 continue
+
+            # 2. Minimum length gate: discard dots and tiny artifacts.
+            length = _path_length(path)
+            if length < min_length:
+                continue
+
             result.append(path)
         return result
 

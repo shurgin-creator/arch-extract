@@ -451,15 +451,20 @@ class PDFProcessor:
             return ""
 
     @staticmethod
-    def _bezier_points(p0, p1, p2, p3, scale: float, n: int = 12):
-        """Approximate a cubic Bezier curve as a list of pixel [x, y] pairs."""
+    def _bezier_points(p0, p1, p2, p3, sx: float, sy: float, ox: float, oy: float, n: int = 12):
+        """Approximate a cubic Bezier curve as a list of pixel [x, y] pairs.
+
+        Args:
+            sx, sy: per-axis pixel scale factors (img_pixels / page_points)
+            ox, oy: page CropBox origin offsets in points (subtracted before scaling)
+        """
         pts = []
         for i in range(n + 1):
             t = i / n
             mt = 1.0 - t
             x = mt**3 * p0.x + 3*mt**2*t * p1.x + 3*mt*t**2 * p2.x + t**3 * p3.x
             y = mt**3 * p0.y + 3*mt**2*t * p1.y + 3*mt*t**2 * p2.y + t**3 * p3.y
-            pts.append([int(x * scale), int(y * scale)])
+            pts.append([int((x - ox) * sx), int((y - oy) * sy)])
         return pts
 
     def overlay_cad_vectors(
@@ -467,7 +472,6 @@ class PDFProcessor:
         pdf_bytes: bytes,
         page_num: int,
         img_array,
-        dpi: int = 200,
     ):
         """
         Draw raw CAD vector paths from the PDF onto a BGR numpy image array.
@@ -476,12 +480,14 @@ class PDFProcessor:
         rectangles, bezier curves) and renders them as thin cyan lines so the
         underlying raster detail is still visible.
 
+        Coordinate mapping is derived from the actual image dimensions vs the
+        fitz page.rect dimensions, so it remains correct regardless of any
+        poppler-vs-fitz rendering size differences or CropBox offsets.
+
         Args:
             pdf_bytes: PDF file as bytes
             page_num: 1-based page number
             img_array: BGR numpy array (modified in-place and returned)
-            dpi: Render DPI — must match the DPI used to produce img_array so
-                 the coordinate scale factor is correct
 
         Returns:
             img_array with CAD vectors drawn on it
@@ -492,9 +498,18 @@ class PDFProcessor:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         try:
             page = doc[page_num - 1]
-            scale = dpi / 72.0  # fitz page points → pixel coordinates
-            drawings = page.get_drawings()
+            page_rect = page.rect  # fitz page bounds in PDF points
 
+            # Compute true pixel-per-point scale from the actual rendered image
+            # dimensions. This eliminates any poppler vs. fitz rounding difference
+            # and correctly handles non-zero CropBox origins.
+            img_h, img_w = img_array.shape[:2]
+            sx = img_w / page_rect.width   # x pixels per page point
+            sy = img_h / page_rect.height  # y pixels per page point
+            ox = page_rect.x0              # CropBox x origin (usually 0)
+            oy = page_rect.y0              # CropBox y origin (usually 0)
+
+            drawings = page.get_drawings()
             color = (200, 200, 0)  # bright cyan in BGR
             thickness = 1
 
@@ -503,26 +518,26 @@ class PDFProcessor:
                     kind = item[0]
                     if kind == "l":  # straight line segment
                         p1, p2 = item[1], item[2]
-                        pt1 = (int(p1.x * scale), int(p1.y * scale))
-                        pt2 = (int(p2.x * scale), int(p2.y * scale))
+                        pt1 = (int((p1.x - ox) * sx), int((p1.y - oy) * sy))
+                        pt2 = (int((p2.x - ox) * sx), int((p2.y - oy) * sy))
                         cv2.line(img_array, pt1, pt2, color, thickness, cv2.LINE_AA)
                     elif kind == "re":  # axis-aligned rectangle
                         rect = item[1]
-                        pt1 = (int(rect.x0 * scale), int(rect.y0 * scale))
-                        pt2 = (int(rect.x1 * scale), int(rect.y1 * scale))
+                        pt1 = (int((rect.x0 - ox) * sx), int((rect.y0 - oy) * sy))
+                        pt2 = (int((rect.x1 - ox) * sx), int((rect.y1 - oy) * sy))
                         cv2.rectangle(img_array, pt1, pt2, color, thickness)
                     elif kind == "qu":  # quadrilateral (4 fitz.Point)
                         quad = item[1]
                         pts_q = [
-                            [int(quad.ul.x * scale), int(quad.ul.y * scale)],
-                            [int(quad.ur.x * scale), int(quad.ur.y * scale)],
-                            [int(quad.lr.x * scale), int(quad.lr.y * scale)],
-                            [int(quad.ll.x * scale), int(quad.ll.y * scale)],
+                            [int((quad.ul.x - ox) * sx), int((quad.ul.y - oy) * sy)],
+                            [int((quad.ur.x - ox) * sx), int((quad.ur.y - oy) * sy)],
+                            [int((quad.lr.x - ox) * sx), int((quad.lr.y - oy) * sy)],
+                            [int((quad.ll.x - ox) * sx), int((quad.ll.y - oy) * sy)],
                         ]
                         arr_q = np.array(pts_q, dtype=np.int32).reshape((-1, 1, 2))
                         cv2.polylines(img_array, [arr_q], True, color, thickness, cv2.LINE_AA)
                     elif kind == "c":  # cubic Bezier
-                        pts_b = self._bezier_points(item[1], item[2], item[3], item[4], scale)
+                        pts_b = self._bezier_points(item[1], item[2], item[3], item[4], sx, sy, ox, oy)
                         arr_b = np.array(pts_b, dtype=np.int32).reshape((-1, 1, 2))
                         cv2.polylines(img_array, [arr_b], False, color, thickness, cv2.LINE_AA)
 
@@ -657,7 +672,7 @@ class PDFProcessor:
 
             # Optional: overlay raw CAD vector geometry in cyan
             if overlay_vectors:
-                img_display = self.overlay_cad_vectors(pdf_bytes, page_num, img_display, dpi=dpi)
+                img_display = self.overlay_cad_vectors(pdf_bytes, page_num, img_display)
 
             # numpy BGR → PIL RGB
             img_rgb = cv2.cvtColor(img_display, cv2.COLOR_BGR2RGB)

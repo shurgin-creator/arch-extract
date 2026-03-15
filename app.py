@@ -227,7 +227,8 @@ def show_trace_dialog(field_code: str, field_data: dict, pdf_bytes: bytes, dpi: 
         try:
             processor = PDFProcessor(dpi=dpi, fmt="png")
             highlighted = processor.render_page_with_highlight(
-                pdf_bytes, page_num, bb, dpi=dpi
+                pdf_bytes, page_num, bb, dpi=dpi,
+                overlay_vectors=st.session_state.get("show_cad_vectors", False),
             )
             st.image(highlighted, width="stretch")
         except Exception as e:
@@ -291,7 +292,10 @@ def show_pdf_required_dialog(field_code: str, field_data: dict, dpi: int):
     with st.spinner("Rendering trace…"):
         try:
             processor = PDFProcessor(dpi=dpi, fmt="png")
-            highlighted = processor.render_page_with_highlight(pdf_bytes, page_num, bb, dpi=dpi)
+            highlighted = processor.render_page_with_highlight(
+                pdf_bytes, page_num, bb, dpi=dpi,
+                overlay_vectors=st.session_state.get("show_cad_vectors", False),
+            )
             st.image(highlighted, width="stretch")
         except Exception as e:
             st.error(f"Could not render highlight: {e}")
@@ -724,6 +728,17 @@ def main():
                 st.caption(
                     "Preprocessing is applied per-page inside the lazy extraction loop "
                     "and does not increase peak memory usage."
+                )
+
+                st.checkbox(
+                    "[Beta] Show Raw CAD Vectors",
+                    value=False,
+                    key="show_cad_vectors",
+                    help=(
+                        "Overlay the exact vector geometry extracted from the PDF onto "
+                        "the Visual Trace image. Cyan lines show raw CAD paths before "
+                        "any rasterisation — useful for verifying bounding box alignment."
+                    ),
                 )
 
             st.subheader("API Status")

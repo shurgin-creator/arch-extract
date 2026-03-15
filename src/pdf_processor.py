@@ -450,12 +450,97 @@ class PDFProcessor:
         except Exception:
             return ""
 
+    @staticmethod
+    def _bezier_points(p0, p1, p2, p3, scale: float, n: int = 12):
+        """Approximate a cubic Bezier curve as a list of pixel [x, y] pairs."""
+        pts = []
+        for i in range(n + 1):
+            t = i / n
+            mt = 1.0 - t
+            x = mt**3 * p0.x + 3*mt**2*t * p1.x + 3*mt*t**2 * p2.x + t**3 * p3.x
+            y = mt**3 * p0.y + 3*mt**2*t * p1.y + 3*mt*t**2 * p2.y + t**3 * p3.y
+            pts.append([int(x * scale), int(y * scale)])
+        return pts
+
+    def overlay_cad_vectors(
+        self,
+        pdf_bytes: bytes,
+        page_num: int,
+        img_array,
+        dpi: int = 200,
+    ):
+        """
+        Draw raw CAD vector paths from the PDF onto a BGR numpy image array.
+
+        Uses fitz page.get_drawings() to extract all vector geometry (lines,
+        rectangles, bezier curves) and renders them as thin cyan lines so the
+        underlying raster detail is still visible.
+
+        Args:
+            pdf_bytes: PDF file as bytes
+            page_num: 1-based page number
+            img_array: BGR numpy array (modified in-place and returned)
+            dpi: Render DPI — must match the DPI used to produce img_array so
+                 the coordinate scale factor is correct
+
+        Returns:
+            img_array with CAD vectors drawn on it
+        """
+        if not _CV2_AVAILABLE:
+            return img_array
+
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        try:
+            page = doc[page_num - 1]
+            scale = dpi / 72.0  # fitz page points → pixel coordinates
+            drawings = page.get_drawings()
+
+            color = (200, 200, 0)  # bright cyan in BGR
+            thickness = 1
+
+            for path in drawings:
+                for item in path.get("items", []):
+                    kind = item[0]
+                    if kind == "l":  # straight line segment
+                        p1, p2 = item[1], item[2]
+                        pt1 = (int(p1.x * scale), int(p1.y * scale))
+                        pt2 = (int(p2.x * scale), int(p2.y * scale))
+                        cv2.line(img_array, pt1, pt2, color, thickness, cv2.LINE_AA)
+                    elif kind == "re":  # axis-aligned rectangle
+                        rect = item[1]
+                        pt1 = (int(rect.x0 * scale), int(rect.y0 * scale))
+                        pt2 = (int(rect.x1 * scale), int(rect.y1 * scale))
+                        cv2.rectangle(img_array, pt1, pt2, color, thickness)
+                    elif kind == "qu":  # quadrilateral (4 fitz.Point)
+                        quad = item[1]
+                        pts_q = [
+                            [int(quad.ul.x * scale), int(quad.ul.y * scale)],
+                            [int(quad.ur.x * scale), int(quad.ur.y * scale)],
+                            [int(quad.lr.x * scale), int(quad.lr.y * scale)],
+                            [int(quad.ll.x * scale), int(quad.ll.y * scale)],
+                        ]
+                        arr_q = np.array(pts_q, dtype=np.int32).reshape((-1, 1, 2))
+                        cv2.polylines(img_array, [arr_q], True, color, thickness, cv2.LINE_AA)
+                    elif kind == "c":  # cubic Bezier
+                        pts_b = self._bezier_points(item[1], item[2], item[3], item[4], scale)
+                        arr_b = np.array(pts_b, dtype=np.int32).reshape((-1, 1, 2))
+                        cv2.polylines(img_array, [arr_b], False, color, thickness, cv2.LINE_AA)
+
+            return img_array
+
+        except Exception as e:
+            print(f"overlay_cad_vectors warning (non-fatal): {e}")
+            return img_array
+        finally:
+            doc.close()
+
     def render_page_with_highlight(
         self,
         pdf_bytes: bytes,
         page_num: int,
         bounding_box,
         dpi: int = 200,
+        overlay_vectors: bool = False,
     ) -> Image.Image:
         """
         Render a single PDF page and draw highlight overlay(s) over the bounding box(es).
@@ -569,6 +654,10 @@ class PDFProcessor:
                         cv2.FONT_HERSHEY_SIMPLEX, font_scale,
                         (0, 180, 60), thickness, cv2.LINE_AA,
                     )
+
+            # Optional: overlay raw CAD vector geometry in cyan
+            if overlay_vectors:
+                img_display = self.overlay_cad_vectors(pdf_bytes, page_num, img_display, dpi=dpi)
 
             # numpy BGR → PIL RGB
             img_rgb = cv2.cvtColor(img_display, cv2.COLOR_BGR2RGB)

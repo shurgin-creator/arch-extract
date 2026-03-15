@@ -467,6 +467,95 @@ class PDFProcessor:
             pts.append([int(tp.x), int(tp.y)])
         return pts
 
+    @staticmethod
+    def extract_transformed_vectors(page, mat):
+        """Return all vector-path sample points for *page* in pixel space.
+
+        Applies the same three-step transform used by overlay_cad_vectors so
+        points align 1:1 with the fitz get_pixmap() raster:
+            page.rotation_matrix * translate(-x0, -y0) * mat
+
+        Args:
+            page: open fitz.Page object
+            mat:  fitz.Matrix — the DPI scale matrix (e.g. fitz.Matrix(dpi/72, dpi/72))
+
+        Returns:
+            list of (int x, int y) pixel coordinate tuples
+        """
+        offset_mat = fitz.Matrix(1, 0, 0, 1, -page.rect.x0, -page.rect.y0)
+        combined_mat = page.rotation_matrix * offset_mat * mat
+
+        points = []
+        for path in page.get_drawings():
+            for item in path.get("items", []):
+                kind = item[0]
+                if kind == "l":
+                    for pt in (item[1], item[2]):
+                        tp = pt * combined_mat
+                        points.append((int(tp.x), int(tp.y)))
+                elif kind == "re":
+                    rect = item[1]
+                    for pt in (
+                        fitz.Point(rect.x0, rect.y0), fitz.Point(rect.x1, rect.y0),
+                        fitz.Point(rect.x1, rect.y1), fitz.Point(rect.x0, rect.y1),
+                    ):
+                        tp = pt * combined_mat
+                        points.append((int(tp.x), int(tp.y)))
+                elif kind == "qu":
+                    quad = item[1]
+                    for pt in (quad.ul, quad.ur, quad.lr, quad.ll):
+                        tp = pt * combined_mat
+                        points.append((int(tp.x), int(tp.y)))
+                elif kind == "c":
+                    bezier_pts = PDFProcessor._bezier_points(
+                        item[1], item[2], item[3], item[4], combined_mat
+                    )
+                    points.extend((p[0], p[1]) for p in bezier_pts)
+        return points
+
+    @staticmethod
+    def snap_bbox_to_vectors(gemini_bbox, vector_points, img_w, img_h, expand=0.10):
+        """Snap a Gemini bounding box to the tightest fit around nearby CAD vectors.
+
+        1. Convert gemini_bbox from 0-1000 normalized coords to pixels.
+        2. Expand by *expand* fraction in every direction to form a search zone.
+        3. Keep only vector points that fall strictly inside the search zone.
+        4. If no points found → return original pixel bbox as fallback.
+        5. If points found → return (min_x, min_y, max_x, max_y) over those points.
+
+        Args:
+            gemini_bbox:   [ymin, xmin, ymax, xmax] in 0-1000 normalized coords
+            vector_points: list of (x, y) pixel tuples from extract_transformed_vectors
+            img_w, img_h:  image pixel dimensions
+            expand:        fractional expansion of the search zone (default 0.10 = 10%)
+
+        Returns:
+            (x1, y1, x2, y2) pixel coords of the snapped (or fallback) bounding box
+        """
+        ymin, xmin, ymax, xmax = gemini_bbox
+        # Convert 0-1000 → pixels (no extra expand here; keep raw Gemini box)
+        px1 = int(xmin / 1000 * img_w)
+        py1 = int(ymin / 1000 * img_h)
+        px2 = int(xmax / 1000 * img_w)
+        py2 = int(ymax / 1000 * img_h)
+
+        # Expand search zone by *expand* fraction of box dimensions
+        ex = int((px2 - px1) * expand)
+        ey = int((py2 - py1) * expand)
+        sx1 = max(0, px1 - ex)
+        sy1 = max(0, py1 - ey)
+        sx2 = min(img_w - 1, px2 + ex)
+        sy2 = min(img_h - 1, py2 + ey)
+
+        inside = [(x, y) for x, y in vector_points if sx1 < x < sx2 and sy1 < y < sy2]
+
+        if not inside:
+            return px1, py1, px2, py2  # fallback: original Gemini box in pixels
+
+        xs = [p[0] for p in inside]
+        ys = [p[1] for p in inside]
+        return min(xs), min(ys), max(xs), max(ys)
+
     def overlay_cad_vectors(
         self,
         pdf_bytes: bytes,
@@ -568,6 +657,7 @@ class PDFProcessor:
         bounding_box,
         dpi: int = 200,
         overlay_vectors: bool = False,
+        snap_vectors: bool = False,
     ) -> Image.Image:
         """
         Render a single PDF page and draw highlight overlay(s) over the bounding box(es).
@@ -648,15 +738,34 @@ class PDFProcessor:
             gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
             img_display = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
+            # Pre-extract vector points once if snapping is requested
+            if snap_vectors:
+                fitz_doc2 = fitz.open(stream=pdf_bytes, filetype="pdf")
+                try:
+                    snap_page = fitz_doc2[page_num - 1]
+                    vector_points = self.extract_transformed_vectors(snap_page, render_mat)
+                finally:
+                    fitz_doc2.close()
+            else:
+                vector_points = []
+
             multi = len(boxes) > 1
             for idx, box in enumerate(boxes):
                 ymin, xmin, ymax, xmax = box
 
-                # Map 0-1000 normalized coordinates to pixel coordinates + expand
-                x1 = max(0, int(xmin / 1000 * w) - expand_x)
-                y1 = max(0, int(ymin / 1000 * h) - expand_y)
-                x2 = min(w - 1, int(xmax / 1000 * w) + expand_x)
-                y2 = min(h - 1, int(ymax / 1000 * h) + expand_y)
+                if snap_vectors and vector_points:
+                    # Snap to tight vector bounds; search zone = Gemini box + 10%
+                    x1, y1, x2, y2 = self.snap_bbox_to_vectors(box, vector_points, w, h)
+                    x1 = max(0, x1)
+                    y1 = max(0, y1)
+                    x2 = min(w - 1, x2)
+                    y2 = min(h - 1, y2)
+                else:
+                    # Map 0-1000 normalized coordinates to pixel coordinates + expand
+                    x1 = max(0, int(xmin / 1000 * w) - expand_x)
+                    y1 = max(0, int(ymin / 1000 * h) - expand_y)
+                    x2 = min(w - 1, int(xmax / 1000 * w) + expand_x)
+                    y2 = min(h - 1, int(ymax / 1000 * h) + expand_y)
 
                 # Always: semi-transparent yellow fill + green border for all element types
                 overlay = img_display.copy()

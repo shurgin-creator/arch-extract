@@ -229,6 +229,7 @@ def show_trace_dialog(field_code: str, field_data: dict, pdf_bytes: bytes, dpi: 
             highlighted = processor.render_page_with_highlight(
                 pdf_bytes, page_num, bb, dpi=dpi,
                 overlay_vectors=st.session_state.get("show_cad_vectors", False),
+                snap_vectors=st.session_state.get("snap_vectors", False),
             )
             st.image(highlighted, width="stretch")
         except Exception as e:
@@ -295,6 +296,7 @@ def show_pdf_required_dialog(field_code: str, field_data: dict, dpi: int):
             highlighted = processor.render_page_with_highlight(
                 pdf_bytes, page_num, bb, dpi=dpi,
                 overlay_vectors=st.session_state.get("show_cad_vectors", False),
+                snap_vectors=st.session_state.get("snap_vectors", False),
             )
             st.image(highlighted, width="stretch")
         except Exception as e:
@@ -738,6 +740,16 @@ def main():
                         "Overlay the exact vector geometry extracted from the PDF onto "
                         "the Visual Trace image. Cyan lines show raw CAD paths before "
                         "any rasterisation — useful for verifying bounding box alignment."
+                    ),
+                )
+                st.checkbox(
+                    "[Beta] Enable Vector Snapping",
+                    value=False,
+                    key="snap_vectors",
+                    help=(
+                        "Snap the highlight box to the precise geometric bounds of the "
+                        "CAD vectors inside the Gemini search zone. Replaces the fuzzy "
+                        "Gemini box with a tight fit to the actual drawn lines."
                     ),
                 )
 

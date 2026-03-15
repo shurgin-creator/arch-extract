@@ -514,34 +514,39 @@ class PDFProcessor:
         return points
 
     @staticmethod
-    def snap_bbox_to_vectors(gemini_bbox, vector_points, img_w, img_h, expand=0.10):
+    def snap_bbox_to_vectors(gemini_bbox, vector_points, img_w, img_h, expand=0.05):
         """Snap a Gemini bounding box to the tightest fit around nearby CAD vectors.
 
         1. Convert gemini_bbox from 0-1000 normalized coords to pixels.
-        2. Expand by *expand* fraction in every direction to form a search zone.
+        2. Expand by *expand* fraction (5%) in every direction to form a search zone.
         3. Keep only vector points that fall strictly inside the search zone.
-        4. If no points found → return original pixel bbox as fallback.
-        5. If points found → return (min_x, min_y, max_x, max_y) over those points.
+        4. If no points found → fallback to original Gemini pixel box.
+        5. Use 5th/95th percentile bounds to reject outlier points from adjacent objects.
+        6. If the resulting box is >30% larger than the original Gemini box in either
+           dimension, reject the snap (caught a massive adjacent element) and fallback.
 
         Args:
             gemini_bbox:   [ymin, xmin, ymax, xmax] in 0-1000 normalized coords
             vector_points: list of (x, y) pixel tuples from extract_transformed_vectors
             img_w, img_h:  image pixel dimensions
-            expand:        fractional expansion of the search zone (default 0.10 = 10%)
+            expand:        fractional expansion of the search zone (default 0.05 = 5%)
 
         Returns:
             (x1, y1, x2, y2) pixel coords of the snapped (or fallback) bounding box
         """
         ymin, xmin, ymax, xmax = gemini_bbox
-        # Convert 0-1000 → pixels (no extra expand here; keep raw Gemini box)
+        # Convert 0-1000 → pixels
         px1 = int(xmin / 1000 * img_w)
         py1 = int(ymin / 1000 * img_h)
         px2 = int(xmax / 1000 * img_w)
         py2 = int(ymax / 1000 * img_h)
 
+        orig_w = px2 - px1
+        orig_h = py2 - py1
+
         # Expand search zone by *expand* fraction of box dimensions
-        ex = int((px2 - px1) * expand)
-        ey = int((py2 - py1) * expand)
+        ex = int(orig_w * expand)
+        ey = int(orig_h * expand)
         sx1 = max(0, px1 - ex)
         sy1 = max(0, py1 - ey)
         sx2 = min(img_w - 1, px2 + ex)
@@ -552,9 +557,24 @@ class PDFProcessor:
         if not inside:
             return px1, py1, px2, py2  # fallback: original Gemini box in pixels
 
-        xs = [p[0] for p in inside]
-        ys = [p[1] for p in inside]
-        return min(xs), min(ys), max(xs), max(ys)
+        xs = np.array([p[0] for p in inside], dtype=float)
+        ys = np.array([p[1] for p in inside], dtype=float)
+
+        # Robust bounds: drop the extreme 5% on each side to reject outlier clusters
+        rx1 = int(np.percentile(xs, 5))
+        rx2 = int(np.percentile(xs, 95))
+        ry1 = int(np.percentile(ys, 5))
+        ry2 = int(np.percentile(ys, 95))
+
+        # Sanity check: if the snapped box is >30% larger in either dimension than
+        # the original Gemini box, we likely captured a large adjacent element — fallback.
+        snapped_w = rx2 - rx1
+        snapped_h = ry2 - ry1
+        if (orig_w > 0 and snapped_w > orig_w * 1.30) or \
+           (orig_h > 0 and snapped_h > orig_h * 1.30):
+            return px1, py1, px2, py2
+
+        return rx1, ry1, rx2, ry2
 
     def overlay_cad_vectors(
         self,

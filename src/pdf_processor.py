@@ -35,6 +35,11 @@ except ImportError:
     print("WARNING: opencv-python-headless not installed — preprocessing disabled.")
 
 
+# Categories that represent continuous linear elements (walls, etc.).
+# These use path-tracing highlighting instead of a bounding box.
+CONTINUOUS_CATEGORIES = ["exterior_walls", "interior_walls"]
+
+
 class PDFProcessor:
     """Handles PDF to image conversion, preprocessing, and embedded text extraction."""
 
@@ -469,30 +474,34 @@ class PDFProcessor:
 
     @staticmethod
     def extract_transformed_vectors(page, mat):
-        """Return all vector-path sample points for *page* in pixel space.
+        """Return all vector drawing paths for *page* as transformed pixel-space polylines.
 
         Applies the same three-step transform used by overlay_cad_vectors so
         points align 1:1 with the fitz get_pixmap() raster:
             page.rotation_matrix * translate(-x0, -y0) * mat
+
+        Each fitz drawing path is returned as one polyline — a list of (x, y) pixel
+        tuples sampled from its constituent line segments, beziers, rects and quads.
 
         Args:
             page: open fitz.Page object
             mat:  fitz.Matrix — the DPI scale matrix (e.g. fitz.Matrix(dpi/72, dpi/72))
 
         Returns:
-            list of (int x, int y) pixel coordinate tuples
+            list of polylines, where each polyline is list[tuple[int, int]]
         """
         offset_mat = fitz.Matrix(1, 0, 0, 1, -page.rect.x0, -page.rect.y0)
         combined_mat = page.rotation_matrix * offset_mat * mat
 
-        points = []
+        structural_paths = []
         for path in page.get_drawings():
+            pts = []
             for item in path.get("items", []):
                 kind = item[0]
                 if kind == "l":
                     for pt in (item[1], item[2]):
                         tp = pt * combined_mat
-                        points.append((int(tp.x), int(tp.y)))
+                        pts.append((int(tp.x), int(tp.y)))
                 elif kind == "re":
                     rect = item[1]
                     for pt in (
@@ -500,18 +509,20 @@ class PDFProcessor:
                         fitz.Point(rect.x1, rect.y1), fitz.Point(rect.x0, rect.y1),
                     ):
                         tp = pt * combined_mat
-                        points.append((int(tp.x), int(tp.y)))
+                        pts.append((int(tp.x), int(tp.y)))
                 elif kind == "qu":
                     quad = item[1]
                     for pt in (quad.ul, quad.ur, quad.lr, quad.ll):
                         tp = pt * combined_mat
-                        points.append((int(tp.x), int(tp.y)))
+                        pts.append((int(tp.x), int(tp.y)))
                 elif kind == "c":
                     bezier_pts = PDFProcessor._bezier_points(
                         item[1], item[2], item[3], item[4], combined_mat
                     )
-                    points.extend((p[0], p[1]) for p in bezier_pts)
-        return points
+                    pts.extend((p[0], p[1]) for p in bezier_pts)
+            if pts:
+                structural_paths.append(pts)
+        return structural_paths
 
     @staticmethod
     def snap_bbox_to_vectors(gemini_bbox, vector_points, img_w, img_h, expand=0.05):
@@ -552,7 +563,9 @@ class PDFProcessor:
         sx2 = min(img_w - 1, px2 + ex)
         sy2 = min(img_h - 1, py2 + ey)
 
-        inside = [(x, y) for x, y in vector_points if sx1 < x < sx2 and sy1 < y < sy2]
+        # Flatten structural paths to a single point list for filtering
+        flat_points = [pt for path in vector_points for pt in path]
+        inside = [(x, y) for x, y in flat_points if sx1 < x < sx2 and sy1 < y < sy2]
 
         if not inside:
             return px1, py1, px2, py2  # fallback: original Gemini box in pixels
@@ -575,6 +588,59 @@ class PDFProcessor:
             return px1, py1, px2, py2
 
         return rx1, ry1, rx2, ry2
+
+    @staticmethod
+    def trace_continuous_paths(gemini_bbox, structural_paths, img_w, img_h, expand=0.15):
+        """Filter structural paths to those relevant to a continuous element (e.g. a wall).
+
+        1. Expand the Gemini search zone by *expand* fraction (15%) — walls extend
+           beyond the exact Gemini region, so we cast a wider net than snapping does.
+        2. Keep paths where at least one point falls inside the search zone.
+        3. Discard noise: paths whose total Euclidean length is < 1.5% of img_w
+           (eliminates text glyphs, door arcs, furniture marks, dimension ticks).
+
+        Args:
+            gemini_bbox:      [ymin, xmin, ymax, xmax] in 0-1000 normalized coords
+            structural_paths: list of polylines from extract_transformed_vectors
+            img_w, img_h:     image pixel dimensions
+            expand:           fractional expansion of search zone (default 0.15 = 15%)
+
+        Returns:
+            list of polylines (each a list[tuple[int, int]]) that pass both filters
+        """
+        ymin, xmin, ymax, xmax = gemini_bbox
+        px1 = int(xmin / 1000 * img_w)
+        py1 = int(ymin / 1000 * img_h)
+        px2 = int(xmax / 1000 * img_w)
+        py2 = int(ymax / 1000 * img_h)
+
+        ex = int((px2 - px1) * expand)
+        ey = int((py2 - py1) * expand)
+        sx1 = max(0, px1 - ex)
+        sy1 = max(0, py1 - ey)
+        sx2 = min(img_w - 1, px2 + ex)
+        sy2 = min(img_h - 1, py2 + ey)
+
+        min_length = img_w * 0.015  # noise threshold: 1.5% of image width
+
+        def _path_length(pts):
+            total = 0.0
+            for i in range(1, len(pts)):
+                dx = pts[i][0] - pts[i - 1][0]
+                dy = pts[i][1] - pts[i - 1][1]
+                total += (dx * dx + dy * dy) ** 0.5
+            return total
+
+        result = []
+        for path in structural_paths:
+            # Keep if any point is inside the search zone
+            if not any(sx1 <= x <= sx2 and sy1 <= y <= sy2 for x, y in path):
+                continue
+            # Discard noise by minimum length
+            if _path_length(path) < min_length:
+                continue
+            result.append(path)
+        return result
 
     def overlay_cad_vectors(
         self,
@@ -678,6 +744,7 @@ class PDFProcessor:
         dpi: int = 200,
         overlay_vectors: bool = False,
         snap_vectors: bool = False,
+        category: str = "",
     ) -> Image.Image:
         """
         Render a single PDF page and draw highlight overlay(s) over the bounding box(es).
@@ -758,64 +825,78 @@ class PDFProcessor:
             gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
             img_display = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
-            # Pre-extract vector points once if snapping is requested
+            # Pre-extract structural paths once if snapping or path-tracing is needed
+            is_continuous = category.lower() in CONTINUOUS_CATEGORIES
             if snap_vectors:
                 fitz_doc2 = fitz.open(stream=pdf_bytes, filetype="pdf")
                 try:
                     snap_page = fitz_doc2[page_num - 1]
-                    vector_points = self.extract_transformed_vectors(snap_page, render_mat)
+                    structural_paths = self.extract_transformed_vectors(snap_page, render_mat)
                 finally:
                     fitz_doc2.close()
             else:
-                vector_points = []
+                structural_paths = []
 
             multi = len(boxes) > 1
             for idx, box in enumerate(boxes):
                 ymin, xmin, ymax, xmax = box
 
-                if snap_vectors and vector_points:
-                    # Snap to tight vector bounds; search zone = Gemini box + 10%
-                    x1, y1, x2, y2 = self.snap_bbox_to_vectors(box, vector_points, w, h)
-                    x1 = max(0, x1)
-                    y1 = max(0, y1)
-                    x2 = min(w - 1, x2)
-                    y2 = min(h - 1, y2)
+                use_path_trace = snap_vectors and is_continuous and structural_paths
+                traced = self.trace_continuous_paths(box, structural_paths, w, h) if use_path_trace else []
+
+                if use_path_trace and traced:
+                    # ── Path-tracing mode: thick semi-transparent yellow strokes ──
+                    overlay = img_display.copy()
+                    for path in traced:
+                        arr = np.array(path, dtype=np.int32).reshape((-1, 1, 2))
+                        cv2.polylines(overlay, [arr], False, (0, 255, 255), 6, cv2.LINE_AA)
+                    img_display = cv2.addWeighted(overlay, 0.55, img_display, 0.45, 0)
+                    if multi:
+                        lx, ly = traced[0][0]
+                        font_scale = max(0.5, min(1.0, w / 2000))
+                        cv2.putText(
+                            img_display, str(idx + 1), (lx + 4, ly - 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, font_scale,
+                            (0, 180, 60), max(1, int(font_scale * 2)), cv2.LINE_AA,
+                        )
                 else:
-                    # Map 0-1000 normalized coordinates to pixel coordinates + expand
-                    x1 = max(0, int(xmin / 1000 * w) - expand_x)
-                    y1 = max(0, int(ymin / 1000 * h) - expand_y)
-                    x2 = min(w - 1, int(xmax / 1000 * w) + expand_x)
-                    y2 = min(h - 1, int(ymax / 1000 * h) + expand_y)
+                    # ── Standard box mode (snap or plain Gemini box) ──
+                    if snap_vectors and structural_paths:
+                        x1, y1, x2, y2 = self.snap_bbox_to_vectors(box, structural_paths, w, h)
+                        x1 = max(0, x1)
+                        y1 = max(0, y1)
+                        x2 = min(w - 1, x2)
+                        y2 = min(h - 1, y2)
+                    else:
+                        x1 = max(0, int(xmin / 1000 * w) - expand_x)
+                        y1 = max(0, int(ymin / 1000 * h) - expand_y)
+                        x2 = min(w - 1, int(xmax / 1000 * w) + expand_x)
+                        y2 = min(h - 1, int(ymax / 1000 * h) + expand_y)
 
-                # Always: semi-transparent yellow fill + green border for all element types
-                overlay = img_display.copy()
-                cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 255, 255), -1)
-                img_display = cv2.addWeighted(overlay, 0.35, img_display, 0.65, 0)
-                cv2.rectangle(img_display, (x1, y1), (x2, y2), (0, 180, 60), 2)
+                    # Semi-transparent yellow fill + green border
+                    overlay = img_display.copy()
+                    cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 255, 255), -1)
+                    img_display = cv2.addWeighted(overlay, 0.35, img_display, 0.65, 0)
+                    cv2.rectangle(img_display, (x1, y1), (x2, y2), (0, 180, 60), 2)
 
-                # Centroid crosshair + dot — helps pinpoint the element even when the
-                # box boundary is slightly offset due to Gemini coordinate imprecision.
-                cx = (x1 + x2) // 2
-                cy = (y1 + y2) // 2
-                arm = max(10, min(25, (x2 - x1) // 5, (y2 - y1) // 5))
-                # Red crosshair lines
-                cv2.line(img_display, (cx - arm, cy), (cx + arm, cy), (0, 0, 220), 2, cv2.LINE_AA)
-                cv2.line(img_display, (cx, cy - arm), (cx, cy + arm), (0, 0, 220), 2, cv2.LINE_AA)
-                # White ring + red filled dot for maximum contrast
-                cv2.circle(img_display, (cx, cy), 6, (255, 255, 255), -1)
-                cv2.circle(img_display, (cx, cy), 4, (0, 0, 220), -1)
+                    # Centroid crosshair + dot
+                    cx = (x1 + x2) // 2
+                    cy = (y1 + y2) // 2
+                    arm = max(10, min(25, (x2 - x1) // 5, (y2 - y1) // 5))
+                    cv2.line(img_display, (cx - arm, cy), (cx + arm, cy), (0, 0, 220), 2, cv2.LINE_AA)
+                    cv2.line(img_display, (cx, cy - arm), (cx, cy + arm), (0, 0, 220), 2, cv2.LINE_AA)
+                    cv2.circle(img_display, (cx, cy), 6, (255, 255, 255), -1)
+                    cv2.circle(img_display, (cx, cy), 4, (0, 0, 220), -1)
 
-                # Number label for multi-instance boxes
-                if multi:
-                    label = str(idx + 1)
-                    font_scale = max(0.5, min(1.0, w / 2000))
-                    thickness = max(1, int(font_scale * 2))
-                    cv2.putText(
-                        img_display, label,
-                        (x1 + 4, max(y1 + 20, y1 + int(20 * font_scale))),
-                        cv2.FONT_HERSHEY_SIMPLEX, font_scale,
-                        (0, 180, 60), thickness, cv2.LINE_AA,
-                    )
+                    if multi:
+                        label = str(idx + 1)
+                        font_scale = max(0.5, min(1.0, w / 2000))
+                        cv2.putText(
+                            img_display, label,
+                            (x1 + 4, max(y1 + 20, y1 + int(20 * font_scale))),
+                            cv2.FONT_HERSHEY_SIMPLEX, font_scale,
+                            (0, 180, 60), max(1, int(font_scale * 2)), cv2.LINE_AA,
+                        )
 
             # Optional: overlay raw CAD vector geometry in cyan.
             # Pass render_mat so overlay_cad_vectors uses the exact same transform

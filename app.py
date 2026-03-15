@@ -194,7 +194,7 @@ def _is_valid_bbox(bb) -> bool:
 
 
 @st.dialog("Visual Trace", width="large")
-def show_trace_dialog(field_code: str, field_data: dict, pdf_bytes: bytes, dpi: int):
+def show_trace_dialog(field_code: str, field_data: dict, pdf_bytes: bytes, dpi: int, category: str = ""):
     """Render the highlighted page in a modal dialog."""
     bb = field_data.get("bounding_box")
     if not _is_valid_bbox(bb):
@@ -230,6 +230,7 @@ def show_trace_dialog(field_code: str, field_data: dict, pdf_bytes: bytes, dpi: 
                 pdf_bytes, page_num, bb, dpi=dpi,
                 overlay_vectors=st.session_state.get("show_cad_vectors", False),
                 snap_vectors=st.session_state.get("snap_vectors", False),
+                category=category,
             )
             st.image(highlighted, width="stretch")
         except Exception as e:
@@ -237,7 +238,7 @@ def show_trace_dialog(field_code: str, field_data: dict, pdf_bytes: bytes, dpi: 
 
 
 @st.dialog("PDF Required — Re-upload to Enable Trace", width="large")
-def show_pdf_required_dialog(field_code: str, field_data: dict, dpi: int):
+def show_pdf_required_dialog(field_code: str, field_data: dict, dpi: int, category: str = ""):
     """
     Shown when pdf_bytes is unavailable (old project not yet in Supabase storage).
     Lets the user re-upload the PDF, permanently fixes the storage gap, then renders the trace.
@@ -297,6 +298,7 @@ def show_pdf_required_dialog(field_code: str, field_data: dict, dpi: int):
                 pdf_bytes, page_num, bb, dpi=dpi,
                 overlay_vectors=st.session_state.get("show_cad_vectors", False),
                 snap_vectors=st.session_state.get("snap_vectors", False),
+                category=category,
             )
             st.image(highlighted, width="stretch")
         except Exception as e:
@@ -1238,9 +1240,9 @@ def display_categorized_dataframe(results_df: pd.DataFrame):
             if cols[7].button("🔍 Trace", key=safe_key, use_container_width=True):
                 pdf_bytes = _get_pdf_bytes()
                 if pdf_bytes:
-                    show_trace_dialog(field_code, field_data_raw, pdf_bytes, dpi)
+                    show_trace_dialog(field_code, field_data_raw, pdf_bytes, dpi, category=selected_category)
                 else:
-                    show_pdf_required_dialog(field_code, field_data_raw, dpi)
+                    show_pdf_required_dialog(field_code, field_data_raw, dpi, category=selected_category)
         else:
             cols[7].markdown("<span style='color:#aaa;font-size:0.85em;'>no trace</span>", unsafe_allow_html=True)
 

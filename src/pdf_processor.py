@@ -451,12 +451,11 @@ class PDFProcessor:
             return ""
 
     @staticmethod
-    def _bezier_points(p0, p1, p2, p3, sx: float, sy: float, ox: float, oy: float, n: int = 12):
+    def _bezier_points(p0, p1, p2, p3, mat, n: int = 12):
         """Approximate a cubic Bezier curve as a list of pixel [x, y] pairs.
 
-        Args:
-            sx, sy: per-axis pixel scale factors (img_pixels / page_points)
-            ox, oy: page CropBox origin offsets in points (subtracted before scaling)
+        All four control points are transformed via the fitz matrix `mat` so the
+        result is in the same pixel coordinate space as the rendered pixmap.
         """
         pts = []
         for i in range(n + 1):
@@ -464,7 +463,8 @@ class PDFProcessor:
             mt = 1.0 - t
             x = mt**3 * p0.x + 3*mt**2*t * p1.x + 3*mt*t**2 * p2.x + t**3 * p3.x
             y = mt**3 * p0.y + 3*mt**2*t * p1.y + 3*mt*t**2 * p2.y + t**3 * p3.y
-            pts.append([int((x - ox) * sx), int((y - oy) * sy)])
+            tp = fitz.Point(x, y) * mat
+            pts.append([int(tp.x), int(tp.y)])
         return pts
 
     def overlay_cad_vectors(
@@ -472,6 +472,7 @@ class PDFProcessor:
         pdf_bytes: bytes,
         page_num: int,
         img_array,
+        mat: "fitz.Matrix" = None,
     ):
         """
         Draw raw CAD vector paths from the PDF onto a BGR numpy image array.
@@ -480,14 +481,16 @@ class PDFProcessor:
         rectangles, bezier curves) and renders them as thin cyan lines so the
         underlying raster detail is still visible.
 
-        Coordinate mapping is derived from the actual image dimensions vs the
-        fitz page.rect dimensions, so it remains correct regardless of any
-        poppler-vs-fitz rendering size differences or CropBox offsets.
+        Every coordinate is transformed using the same fitz.Matrix that was used
+        to produce the pixmap, guaranteeing sub-pixel alignment between the raster
+        background and the vector overlay.
 
         Args:
             pdf_bytes: PDF file as bytes
             page_num: 1-based page number
             img_array: BGR numpy array (modified in-place and returned)
+            mat: fitz.Matrix used when rendering the pixmap. When None, a scale
+                 matrix is inferred from img_array dimensions vs page.rect.
 
         Returns:
             img_array with CAD vectors drawn on it
@@ -498,16 +501,15 @@ class PDFProcessor:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         try:
             page = doc[page_num - 1]
-            page_rect = page.rect  # fitz page bounds in PDF points
 
-            # Compute true pixel-per-point scale from the actual rendered image
-            # dimensions. This eliminates any poppler vs. fitz rounding difference
-            # and correctly handles non-zero CropBox origins.
-            img_h, img_w = img_array.shape[:2]
-            sx = img_w / page_rect.width   # x pixels per page point
-            sy = img_h / page_rect.height  # y pixels per page point
-            ox = page_rect.x0              # CropBox x origin (usually 0)
-            oy = page_rect.y0              # CropBox y origin (usually 0)
+            # If caller didn't supply the exact matrix, infer it from the image
+            # dimensions — this is accurate when fitz was used for rendering.
+            if mat is None:
+                pr = page.rect
+                img_h, img_w = img_array.shape[:2]
+                sx = img_w / pr.width
+                sy = img_h / pr.height
+                mat = fitz.Matrix(sx, sy)
 
             drawings = page.get_drawings()
             color = (200, 200, 0)  # bright cyan in BGR
@@ -517,27 +519,28 @@ class PDFProcessor:
                 for item in path.get("items", []):
                     kind = item[0]
                     if kind == "l":  # straight line segment
-                        p1, p2 = item[1], item[2]
-                        pt1 = (int((p1.x - ox) * sx), int((p1.y - oy) * sy))
-                        pt2 = (int((p2.x - ox) * sx), int((p2.y - oy) * sy))
-                        cv2.line(img_array, pt1, pt2, color, thickness, cv2.LINE_AA)
+                        tp1 = item[1] * mat
+                        tp2 = item[2] * mat
+                        cv2.line(img_array,
+                                 (int(tp1.x), int(tp1.y)),
+                                 (int(tp2.x), int(tp2.y)),
+                                 color, thickness, cv2.LINE_AA)
                     elif kind == "re":  # axis-aligned rectangle
                         rect = item[1]
-                        pt1 = (int((rect.x0 - ox) * sx), int((rect.y0 - oy) * sy))
-                        pt2 = (int((rect.x1 - ox) * sx), int((rect.y1 - oy) * sy))
-                        cv2.rectangle(img_array, pt1, pt2, color, thickness)
-                    elif kind == "qu":  # quadrilateral (4 fitz.Point)
+                        tp1 = fitz.Point(rect.x0, rect.y0) * mat
+                        tp2 = fitz.Point(rect.x1, rect.y1) * mat
+                        cv2.rectangle(img_array,
+                                      (int(tp1.x), int(tp1.y)),
+                                      (int(tp2.x), int(tp2.y)),
+                                      color, thickness)
+                    elif kind == "qu":  # quadrilateral
                         quad = item[1]
-                        pts_q = [
-                            [int((quad.ul.x - ox) * sx), int((quad.ul.y - oy) * sy)],
-                            [int((quad.ur.x - ox) * sx), int((quad.ur.y - oy) * sy)],
-                            [int((quad.lr.x - ox) * sx), int((quad.lr.y - oy) * sy)],
-                            [int((quad.ll.x - ox) * sx), int((quad.ll.y - oy) * sy)],
-                        ]
+                        corners = [quad.ul, quad.ur, quad.lr, quad.ll]
+                        pts_q = [[int((p * mat).x), int((p * mat).y)] for p in corners]
                         arr_q = np.array(pts_q, dtype=np.int32).reshape((-1, 1, 2))
                         cv2.polylines(img_array, [arr_q], True, color, thickness, cv2.LINE_AA)
                     elif kind == "c":  # cubic Bezier
-                        pts_b = self._bezier_points(item[1], item[2], item[3], item[4], sx, sy, ox, oy)
+                        pts_b = self._bezier_points(item[1], item[2], item[3], item[4], mat)
                         arr_b = np.array(pts_b, dtype=np.int32).reshape((-1, 1, 2))
                         cv2.polylines(img_array, [arr_b], False, color, thickness, cv2.LINE_AA)
 
@@ -599,13 +602,19 @@ class PDFProcessor:
             return _plain_render()
 
         try:
-            page_images = convert_from_bytes(
-                pdf_bytes, dpi=dpi, fmt="png",
-                poppler_path=self.poppler_path,
-                first_page=page_num, last_page=page_num,
-            )
-            image = page_images[0]
-            del page_images
+            # Render with fitz so the vector coordinate space is IDENTICAL to
+            # the raster background — using the same Matrix guarantees 1-to-1
+            # alignment without any poppler-vs-MuPDF rendering differences.
+            fitz_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            try:
+                fitz_page = fitz_doc[page_num - 1]
+                render_mat = fitz.Matrix(dpi / 72.0, dpi / 72.0)
+                pix = fitz_page.get_pixmap(matrix=render_mat, alpha=False)
+                # pix.samples is RGB bytes → numpy → BGR
+                img_np_rgb = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, 3)
+                image = Image.fromarray(img_np_rgb)  # RGB PIL for preprocessing
+            finally:
+                fitz_doc.close()
 
             # Apply the same preprocessing pipeline used during extraction so
             # the bounding box coordinates Gemini returned align with the pixels.
@@ -670,9 +679,11 @@ class PDFProcessor:
                         (0, 180, 60), thickness, cv2.LINE_AA,
                     )
 
-            # Optional: overlay raw CAD vector geometry in cyan
+            # Optional: overlay raw CAD vector geometry in cyan.
+            # Pass render_mat so overlay_cad_vectors uses the exact same transform
+            # that produced the pixmap — guarantees 1:1 pixel alignment.
             if overlay_vectors:
-                img_display = self.overlay_cad_vectors(pdf_bytes, page_num, img_display)
+                img_display = self.overlay_cad_vectors(pdf_bytes, page_num, img_display, mat=render_mat)
 
             # numpy BGR → PIL RGB
             img_rgb = cv2.cvtColor(img_display, cv2.COLOR_BGR2RGB)

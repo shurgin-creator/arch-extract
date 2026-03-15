@@ -826,8 +826,10 @@ class PDFProcessor:
             img_display = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
             # Pre-extract structural paths once if snapping or path-tracing is needed
-            normalized_cat = category.lower().replace(" ", "_").replace("-", "_")
-            is_continuous = normalized_cat in CONTINUOUS_CATEGORIES
+            # Bulletproof check: any category/field name containing "wall" triggers
+            # path-tracing mode, regardless of spacing, casing, or naming conventions.
+            is_continuous = "wall" in str(category).lower()
+            print(f"DEBUG render: category={category!r} is_continuous={is_continuous}")
             if snap_vectors:
                 fitz_doc2 = fitz.open(stream=pdf_bytes, filetype="pdf")
                 try:
@@ -852,8 +854,10 @@ class PDFProcessor:
                     # ── Path-tracing mode: thick semi-transparent yellow strokes ──
                     overlay = img_display.copy()
                     for path in traced:
-                        arr = np.array(path, dtype=np.int32).reshape((-1, 1, 2))
-                        cv2.polylines(overlay, [arr], False, (0, 255, 255), 6, cv2.LINE_AA)
+                        if len(path) < 2:
+                            continue  # cv2.polylines requires at least 2 points
+                        pts = np.array(path, np.int32).reshape((-1, 1, 2))
+                        cv2.polylines(overlay, [pts], isClosed=False, color=(0, 255, 255), thickness=6, lineType=cv2.LINE_AA)
                     img_display = cv2.addWeighted(overlay, 0.55, img_display, 0.45, 0)
                     if multi:
                         lx, ly = traced[0][0]

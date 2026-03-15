@@ -455,7 +455,6 @@ class PDFProcessor:
         pdf_bytes: bytes,
         page_num: int,
         bounding_box,
-        highlight_type: str = "region",
         dpi: int = 200,
     ) -> Image.Image:
         """
@@ -464,9 +463,12 @@ class PDFProcessor:
         Accepts either a single box [ymin, xmin, ymax, xmax] or a list of boxes
         [[ymin1,xmin1,ymax1,xmax1], [ymin2,xmin2,ymax2,xmax2], ...].
 
+        Each box receives a semi-transparent yellow fill + green border, plus a red
+        centroid crosshair/dot to help pinpoint the element even if the box boundary
+        is slightly offset due to Gemini coordinate imprecision.
+
         Each box is expanded by BOX_EXPAND_FRAC of the image dimensions to provide a
-        forgiving visual margin that compensates for Gemini's inherent coordinate
-        imprecision (typically ±1-2% of page dimensions).
+        forgiving visual margin.
 
         The page is converted to grayscale so colored overlays stand out clearly.
         Preprocessing (CLAHE, deskew) is applied so pixel coordinates match those
@@ -476,8 +478,6 @@ class PDFProcessor:
             pdf_bytes: PDF file as bytes
             page_num: 1-based page number to render
             bounding_box: [ymin, xmin, ymax, xmax] OR [[y,x,y,x], ...] in 0-1000 coords
-            highlight_type: "region" — semi-transparent yellow fill;
-                            "text"   — green outline rectangle only
             dpi: Render resolution (default 200 — lower for speed at view time)
 
         Returns:
@@ -540,16 +540,23 @@ class PDFProcessor:
                 x2 = min(w - 1, int(xmax / 1000 * w) + expand_x)
                 y2 = min(h - 1, int(ymax / 1000 * h) + expand_y)
 
-                if highlight_type == "region":
-                    # Semi-transparent yellow fill — black lines show through
-                    overlay = img_display.copy()
-                    cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 255, 255), -1)
-                    img_display = cv2.addWeighted(overlay, 0.35, img_display, 0.65, 0)
-                    # Green border on top of fill for precision
-                    cv2.rectangle(img_display, (x1, y1), (x2, y2), (0, 180, 60), 2)
-                else:
-                    # "text" — clean green outline only, 3px thick
-                    cv2.rectangle(img_display, (x1, y1), (x2, y2), (0, 200, 100), 3)
+                # Always: semi-transparent yellow fill + green border for all element types
+                overlay = img_display.copy()
+                cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 255, 255), -1)
+                img_display = cv2.addWeighted(overlay, 0.35, img_display, 0.65, 0)
+                cv2.rectangle(img_display, (x1, y1), (x2, y2), (0, 180, 60), 2)
+
+                # Centroid crosshair + dot — helps pinpoint the element even when the
+                # box boundary is slightly offset due to Gemini coordinate imprecision.
+                cx = (x1 + x2) // 2
+                cy = (y1 + y2) // 2
+                arm = max(10, min(25, (x2 - x1) // 5, (y2 - y1) // 5))
+                # Red crosshair lines
+                cv2.line(img_display, (cx - arm, cy), (cx + arm, cy), (0, 0, 220), 2, cv2.LINE_AA)
+                cv2.line(img_display, (cx, cy - arm), (cx, cy + arm), (0, 0, 220), 2, cv2.LINE_AA)
+                # White ring + red filled dot for maximum contrast
+                cv2.circle(img_display, (cx, cy), 6, (255, 255, 255), -1)
+                cv2.circle(img_display, (cx, cy), 4, (0, 0, 220), -1)
 
                 # Number label for multi-instance boxes
                 if multi:

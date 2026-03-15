@@ -502,14 +502,23 @@ class PDFProcessor:
         try:
             page = doc[page_num - 1]
 
-            # If caller didn't supply the exact matrix, infer it from the image
-            # dimensions — this is accurate when fitz was used for rendering.
+            # If caller didn't supply the scale matrix, infer it from image dims.
             if mat is None:
                 pr = page.rect
                 img_h, img_w = img_array.shape[:2]
-                sx = img_w / pr.width
-                sy = img_h / pr.height
-                mat = fitz.Matrix(sx, sy)
+                mat = fitz.Matrix(img_w / pr.width, img_h / pr.height)
+
+            # page.get_drawings() returns coordinates in the PDF's raw user-space,
+            # which has NOT had page rotation or CropBox offsets applied.
+            # page.get_pixmap(matrix=mat) renders in the canonical "device" space,
+            # which HAS had rotation/CropBox applied.
+            #
+            # page.transformation_matrix maps:
+            #   PDF user-space coords  →  canonical MuPDF device-space coords
+            #
+            # So the full PDF-coords → pixel transform is:
+            #   combined = page.transformation_matrix * mat
+            combined_mat = page.transformation_matrix * mat
 
             drawings = page.get_drawings()
             color = (200, 200, 0)  # bright cyan in BGR
@@ -519,16 +528,16 @@ class PDFProcessor:
                 for item in path.get("items", []):
                     kind = item[0]
                     if kind == "l":  # straight line segment
-                        tp1 = item[1] * mat
-                        tp2 = item[2] * mat
+                        tp1 = item[1] * combined_mat
+                        tp2 = item[2] * combined_mat
                         cv2.line(img_array,
                                  (int(tp1.x), int(tp1.y)),
                                  (int(tp2.x), int(tp2.y)),
                                  color, thickness, cv2.LINE_AA)
                     elif kind == "re":  # axis-aligned rectangle
                         rect = item[1]
-                        tp1 = fitz.Point(rect.x0, rect.y0) * mat
-                        tp2 = fitz.Point(rect.x1, rect.y1) * mat
+                        tp1 = fitz.Point(rect.x0, rect.y0) * combined_mat
+                        tp2 = fitz.Point(rect.x1, rect.y1) * combined_mat
                         cv2.rectangle(img_array,
                                       (int(tp1.x), int(tp1.y)),
                                       (int(tp2.x), int(tp2.y)),
@@ -536,11 +545,11 @@ class PDFProcessor:
                     elif kind == "qu":  # quadrilateral
                         quad = item[1]
                         corners = [quad.ul, quad.ur, quad.lr, quad.ll]
-                        pts_q = [[int((p * mat).x), int((p * mat).y)] for p in corners]
+                        pts_q = [[int((p * combined_mat).x), int((p * combined_mat).y)] for p in corners]
                         arr_q = np.array(pts_q, dtype=np.int32).reshape((-1, 1, 2))
                         cv2.polylines(img_array, [arr_q], True, color, thickness, cv2.LINE_AA)
                     elif kind == "c":  # cubic Bezier
-                        pts_b = self._bezier_points(item[1], item[2], item[3], item[4], mat)
+                        pts_b = self._bezier_points(item[1], item[2], item[3], item[4], combined_mat)
                         arr_b = np.array(pts_b, dtype=np.int32).reshape((-1, 1, 2))
                         cv2.polylines(img_array, [arr_b], False, color, thickness, cv2.LINE_AA)
 

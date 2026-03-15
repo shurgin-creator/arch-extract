@@ -826,7 +826,8 @@ class PDFProcessor:
             img_display = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
             # Pre-extract structural paths once if snapping or path-tracing is needed
-            is_continuous = category.lower() in CONTINUOUS_CATEGORIES
+            normalized_cat = category.lower().replace(" ", "_").replace("-", "_")
+            is_continuous = normalized_cat in CONTINUOUS_CATEGORIES
             if snap_vectors:
                 fitz_doc2 = fitz.open(stream=pdf_bytes, filetype="pdf")
                 try:
@@ -843,6 +844,9 @@ class PDFProcessor:
 
                 use_path_trace = snap_vectors and is_continuous and structural_paths
                 traced = self.trace_continuous_paths(box, structural_paths, w, h) if use_path_trace else []
+
+                if use_path_trace and not traced:
+                    print(f"DEBUG: Phase 3 triggered but 0 paths found! category={category!r} box={box}")
 
                 if use_path_trace and traced:
                     # ── Path-tracing mode: thick semi-transparent yellow strokes ──

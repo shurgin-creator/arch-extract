@@ -190,11 +190,20 @@ PHYSICAL_UNITS = {
 }
 
 
+def _is_valid_bbox(bb) -> bool:
+    """Return True for a single box [y,x,y,x] or a non-empty list of such boxes."""
+    if not isinstance(bb, list) or len(bb) == 0:
+        return False
+    if isinstance(bb[0], (int, float)):
+        return len(bb) == 4
+    return all(isinstance(b, list) and len(b) == 4 for b in bb)
+
+
 @st.dialog("Visual Trace", width="large")
 def show_trace_dialog(field_code: str, field_data: dict, pdf_bytes: bytes, dpi: int):
     """Render the highlighted page in a modal dialog."""
     bb = field_data.get("bounding_box")
-    if not isinstance(bb, list) or len(bb) != 4:
+    if not _is_valid_bbox(bb):
         st.info("No spatial bounding box is available for this field.")
         return
 
@@ -212,10 +221,15 @@ def show_trace_dialog(field_code: str, field_data: dict, pdf_bytes: bytes, dpi: 
     value = field_data.get("value", "—")
     unit_str = field_data.get("unit", "")
 
+    # Determine box count for display
+    box_count = len(bb) if isinstance(bb[0], list) else 1
+    instances_label = f" &nbsp;|&nbsp; **Instances:** {box_count} highlighted" if box_count > 1 else ""
+
     st.markdown(f"**Field:** `{field_code}` — {measure_name}")
     st.markdown(
         f"**Value:** {value} {unit_str} &nbsp;|&nbsp; **Page:** {page_ref} &nbsp;|&nbsp; "
-        f"**Highlight:** {'Filled region' if highlight_type == 'region' else 'Text outline'}",
+        f"**Highlight:** {'Filled region' if highlight_type == 'region' else 'Text outline'}"
+        f"{instances_label}",
         unsafe_allow_html=True,
     )
 
@@ -268,7 +282,7 @@ def show_pdf_required_dialog(field_code: str, field_data: dict, dpi: int):
 
     # Render trace inline (can't nest @st.dialog calls, so we render directly here)
     bb = field_data.get("bounding_box")
-    if not isinstance(bb, list) or len(bb) != 4:
+    if not _is_valid_bbox(bb):
         st.info("No bounding box available for this field.")
         return
 
@@ -1203,10 +1217,7 @@ def display_categorized_dataframe(results_df: pd.DataFrame):
 
         field_code = row.get("Code", "")
         field_data_raw = results_raw.get(field_code, {})
-        has_bbox = (
-            isinstance(field_data_raw.get("bounding_box"), list)
-            and len(field_data_raw["bounding_box"]) == 4
-        )
+        has_bbox = _is_valid_bbox(field_data_raw.get("bounding_box"))
         # Sanitize key: replace spaces and special chars
         safe_key = f"trace_{selected_category}_{field_code}".replace(" ", "_").replace("/", "_")
 

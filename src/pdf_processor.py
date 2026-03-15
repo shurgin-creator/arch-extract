@@ -454,28 +454,39 @@ class PDFProcessor:
         self,
         pdf_bytes: bytes,
         page_num: int,
-        bounding_box: List[float],
+        bounding_box,
         highlight_type: str = "region",
         dpi: int = 200,
     ) -> Image.Image:
         """
-        Render a single PDF page and draw a highlight overlay over the bounding box.
+        Render a single PDF page and draw highlight overlay(s) over the bounding box(es).
 
-        The page is converted to grayscale so the colored overlay stands out clearly.
+        Accepts either a single box [ymin, xmin, ymax, xmax] or a list of boxes
+        [[ymin1,xmin1,ymax1,xmax1], [ymin2,xmin2,ymax2,xmax2], ...].
+
+        Each box is expanded by BOX_EXPAND_FRAC of the image dimensions to provide a
+        forgiving visual margin that compensates for Gemini's inherent coordinate
+        imprecision (typically ±1-2% of page dimensions).
+
+        The page is converted to grayscale so colored overlays stand out clearly.
         Preprocessing (CLAHE, deskew) is applied so pixel coordinates match those
         seen by Gemini during extraction.
 
         Args:
             pdf_bytes: PDF file as bytes
             page_num: 1-based page number to render
-            bounding_box: [ymin, xmin, ymax, xmax] in 0-1000 normalized coordinates
-            highlight_type: "region" — semi-transparent yellow fill (alpha 0.35);
+            bounding_box: [ymin, xmin, ymax, xmax] OR [[y,x,y,x], ...] in 0-1000 coords
+            highlight_type: "region" — semi-transparent yellow fill;
                             "text"   — green outline rectangle only
             dpi: Render resolution (default 200 — lower for speed at view time)
 
         Returns:
             PIL Image with highlight overlay
         """
+        # Expansion margin: 1.5% of image dimension on each side to absorb
+        # minor coordinate drift between Gemini's extraction pass and trace render.
+        BOX_EXPAND_FRAC = 0.015
+
         def _plain_render():
             imgs = convert_from_bytes(
                 pdf_bytes, dpi=dpi, fmt="png",
@@ -502,13 +513,14 @@ class PDFProcessor:
                 image = self.preprocess_image(image)
 
             w, h = image.size
-            ymin, xmin, ymax, xmax = bounding_box
+            expand_x = int(w * BOX_EXPAND_FRAC)
+            expand_y = int(h * BOX_EXPAND_FRAC)
 
-            # Map 0-1000 normalized coordinates to pixel coordinates
-            x1 = int(xmin / 1000 * w)
-            y1 = int(ymin / 1000 * h)
-            x2 = int(xmax / 1000 * w)
-            y2 = int(ymax / 1000 * h)
+            # Normalise: single box → list of boxes
+            if isinstance(bounding_box[0], (int, float)):
+                boxes = [bounding_box]
+            else:
+                boxes = bounding_box
 
             # PIL → numpy BGR
             img_np = np.array(image.convert("RGB"))
@@ -518,14 +530,38 @@ class PDFProcessor:
             gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
             img_display = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
-            if highlight_type == "region":
-                # Semi-transparent yellow filled rectangle — black lines show through
-                overlay = img_display.copy()
-                cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 255, 255), -1)  # BGR yellow
-                img_display = cv2.addWeighted(overlay, 0.35, img_display, 0.65, 0)
-            else:
-                # "text" — clean green outline only, 3px thick
-                cv2.rectangle(img_display, (x1, y1), (x2, y2), (0, 200, 100), 3)
+            multi = len(boxes) > 1
+            for idx, box in enumerate(boxes):
+                ymin, xmin, ymax, xmax = box
+
+                # Map 0-1000 normalized coordinates to pixel coordinates + expand
+                x1 = max(0, int(xmin / 1000 * w) - expand_x)
+                y1 = max(0, int(ymin / 1000 * h) - expand_y)
+                x2 = min(w - 1, int(xmax / 1000 * w) + expand_x)
+                y2 = min(h - 1, int(ymax / 1000 * h) + expand_y)
+
+                if highlight_type == "region":
+                    # Semi-transparent yellow fill — black lines show through
+                    overlay = img_display.copy()
+                    cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 255, 255), -1)
+                    img_display = cv2.addWeighted(overlay, 0.35, img_display, 0.65, 0)
+                    # Green border on top of fill for precision
+                    cv2.rectangle(img_display, (x1, y1), (x2, y2), (0, 180, 60), 2)
+                else:
+                    # "text" — clean green outline only, 3px thick
+                    cv2.rectangle(img_display, (x1, y1), (x2, y2), (0, 200, 100), 3)
+
+                # Number label for multi-instance boxes
+                if multi:
+                    label = str(idx + 1)
+                    font_scale = max(0.5, min(1.0, w / 2000))
+                    thickness = max(1, int(font_scale * 2))
+                    cv2.putText(
+                        img_display, label,
+                        (x1 + 4, max(y1 + 20, y1 + int(20 * font_scale))),
+                        cv2.FONT_HERSHEY_SIMPLEX, font_scale,
+                        (0, 180, 60), thickness, cv2.LINE_AA,
+                    )
 
             # numpy BGR → PIL RGB
             img_rgb = cv2.cvtColor(img_display, cv2.COLOR_BGR2RGB)

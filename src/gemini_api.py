@@ -575,6 +575,18 @@ Map field names/codes to this ENHANCED structure:
             "validation_status": "verified",
             "page_reference": "Page 1",
             "bounding_box": [245, 120, 380, 450]
+        }},
+        "WIN_TOTAL": {{
+            "code": "WIN_TOTAL",
+            "measure_name": "Total Windows",
+            "value": "4",
+            "unit": "EA",
+            "confidence": 90,
+            "category": "Openings",
+            "reasoning": "4 individual window openings identified on floor plan",
+            "validation_status": "verified",
+            "page_reference": "Page 1",
+            "bounding_box": [[120,80,160,140], [120,310,160,370], [340,180,380,240], [340,420,380,480]]
         }}
     }}
 }}
@@ -592,17 +604,25 @@ PROFESSIONAL VALIDATION STATUS CODES (Must be one of these):
 SPATIAL TRACEABILITY
 ================================================================================
 
-For EVERY extracted field, attempt to identify the bounding box of the region on
-the page where the value was found or measured. Return this as a normalized
-coordinate list: [ymin, xmin, ymax, xmax] where all values are integers in the
-range 0–1000 (0 = top/left edge, 1000 = bottom/right edge of the page).
+For EVERY extracted field, identify the bounding box (or bounding boxes) of the
+region(s) where the value was found. Use normalized coordinates: integers in
+0–1000 where 0 = top/left edge and 1000 = bottom/right edge of the page.
+
+MULTI-INSTANCE FIELDS — when a field has multiple discrete occurrences (e.g.,
+"4 windows", "3 columns", "WI_TOTAL from 8 wall segments"):
+  → Return a LIST of individual tight boxes, one per instance:
+    "bounding_box": [[ymin1,xmin1,ymax1,xmax1], [ymin2,xmin2,ymax2,xmax2], ...]
+  → NEVER wrap all instances in a single giant box spanning the floor plan.
+
+SINGLE-INSTANCE FIELDS — a single label, dimension string, or title block cell:
+  → Return one flat box: "bounding_box": [ymin, xmin, ymax, xmax]
 
 Rules:
-- If you can pinpoint the region (e.g., a dimension string, a label, a title
-  block cell), output the tight bounding box around that region.
-- If the field was inferred from multiple regions or cannot be localized, omit
-  the key or set it to null — never guess.
-- Prefer small, precise boxes over large vague ones.
+- Output TIGHT boxes around each individual element.
+- For multi-instance counts (windows, doors, columns): trace EACH instance.
+- For aggregated linear measures (wall LF): trace EACH individual segment.
+- If the field cannot be spatially localized, set bounding_box to null.
+- Prefer many small precise boxes over one large imprecise box.
 
 Add "bounding_box" to EVERY field object in extracted_fields. Null is valid.
 
